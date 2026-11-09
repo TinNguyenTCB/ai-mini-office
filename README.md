@@ -35,6 +35,12 @@ Chạy rồi mở http://localhost:8000 :
 uvicorn main:app --reload --port 8000
 ```
 
+## Phát hành bản mới
+
+Trước khi push, **tăng `APP_VERSION`** ở đầu `index.html` (vd. `2026.11.09-4` → `2026.11.09-5`).
+GitHub Pages cho trình duyệt giữ file 10 phút; số phiên bản buộc trình duyệt tải lại toàn bộ CSS/JS mới
+thay vì trộn file cũ với file mới.
+
 ## Cấu trúc
 
 | File | Vai trò |

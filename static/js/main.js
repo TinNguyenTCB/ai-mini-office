@@ -110,7 +110,7 @@ function layoutView() {
     zRight = W - 12;
     zTop = Math.max($("sideTab").getBoundingClientRect().bottom, $("reportTab").getBoundingClientRect().bottom) + 8;
   }
-  zc.style.left = `${Math.round(zRight - zc.offsetWidth)}px`;
+  zc.style.left = `${Math.max(8, Math.round(zRight - zc.offsetWidth))}px`;
   zc.style.top = `${Math.round(zTop)}px`;
 }
 

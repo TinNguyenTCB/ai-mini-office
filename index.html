@@ -7,7 +7,34 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap">
-  <link rel="stylesheet" href="static/style.css">
+  <!--
+    Chống "trộn bản cũ – bản mới": GitHub Pages cho trình duyệt giữ file 10 phút, nên CSS/JS cũ có thể
+    chạy cùng index.html mới. Mọi file được tải kèm ?v=APP_VERSION – ĐỔI SỐ NÀY MỖI LẦN PHÁT HÀNH.
+  -->
+  <script>
+    window.APP_VERSION = "2026.11.09-4";
+    (function (v) {
+      var modules = ["main", "iso", "furniture", "pathfinding", "characters", "sim", "dialogue", "markdown", "onboarding", "demo"];
+      var imports = {};
+      modules.forEach(function (name) {
+        var url = new URL("static/js/" + name + ".js", location.href).href;
+        imports[url] = url + "?v=" + v;
+      });
+      var map = document.createElement("script");
+      map.type = "importmap";
+      map.textContent = JSON.stringify({ imports: imports });
+      document.head.appendChild(map);
+      // Nạp CSS ngay trong lúc phân tích trang (không bị nháy giao diện chưa định dạng).
+      document.write('<link rel="stylesheet" href="static/style.css?v=' + v + '">');
+      // Script module chèn động chạy bất đồng bộ -> đợi trang dựng xong mới nạp.
+      document.addEventListener("DOMContentLoaded", function () {
+        var main = document.createElement("script");
+        main.type = "module";
+        main.src = "static/js/main.js?v=" + v;
+        document.body.appendChild(main);
+      });
+    })(window.APP_VERSION);
+  </script>
 </head>
 <body class="booting">
   <canvas id="officeCanvas" aria-label="Văn phòng Mini Capital"></canvas>
@@ -209,6 +236,5 @@
 
   <div id="toast" class="toast" hidden role="status"></div>
 
-  <script type="module" src="static/js/main.js"></script>
 </body>
 </html>
