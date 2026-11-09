@@ -1,0 +1,5 @@
+# Bí mật & môi trường
+.env
+venv/
+__pycache__/
+*.pyc

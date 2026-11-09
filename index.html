@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mini Capital – Văn phòng đầu tư AI</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=Be+Vietnam+Pro:wght@400;600;700;800&display=swap">
+  <link rel="stylesheet" href="static/style.css">
+</head>
+<body class="booting">
+  <canvas id="officeCanvas" aria-label="Văn phòng Mini Capital"></canvas>
+
+  <!-- Thanh trên cùng -->
+  <header class="topbar ui">
+    <button id="menuButton" class="icon-btn" type="button" aria-label="Mở menu" aria-expanded="false" aria-controls="drawer">☰</button>
+    <div class="brand">
+      <span class="logo" aria-hidden="true">MC</span>
+      <div>
+        <strong>Mini Capital</strong>
+        <small>Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <span id="clientBadge" class="client-badge" hidden></span>
+      <span class="conn" title="Kết nối backend"><span class="dot" id="connDot" data-on="false"></span><span id="connText">Đang kết nối…</span></span>
+    </div>
+  </header>
+
+  <!-- Menu ☰ -->
+  <aside id="drawer" class="drawer glass ui" aria-label="Menu" hidden>
+    <div class="drawer-head">
+      <h2>Menu</h2>
+      <button id="drawerClose" class="icon-btn small" type="button" aria-label="Đóng menu">✕</button>
+    </div>
+
+    <section class="drawer-section">
+      <h3>⚙️ Cài đặt AI</h3>
+      <label for="leaderSelect">Giám đốc đầu tư</label>
+      <select id="leaderSelect"><option>Đang tải…</option></select>
+      <label for="workerSelect">Đội phân tích (3 chuyên viên)</label>
+      <select id="workerSelect"><option>Đang tải…</option></select>
+      <p class="muted">Model thiếu API key trong <code>.env</code> sẽ bị khoá.</p>
+    </section>
+
+    <section class="drawer-section">
+      <h3>👤 Khách hàng</h3>
+      <p id="clientInfo" class="muted">Chưa ký đơn cam kết.</p>
+      <div class="btn-row">
+        <button id="viewPledge" class="secondary small" type="button">Xem đơn cam kết</button>
+        <button id="resignPledge" class="secondary small" type="button">Ký lại tên khác</button>
+      </div>
+    </section>
+
+    <section class="drawer-section">
+      <h3>🪑 Nội thất</h3>
+      <button id="furnitureToggle" class="secondary" type="button" aria-expanded="false">Bật chế độ sắp xếp</button>
+      <div id="furnitureEditor" class="furniture-editor" hidden>
+        <p class="muted">Chọn món rồi bấm lên sàn để đặt. Kéo để di chuyển · <kbd>R</kbd> xoay · <kbd>Del</kbd> xoá · <kbd>Esc</kbd> huỷ. <span id="furnitureCount"></span></p>
+        <div id="furnitureCatalog" class="furniture-catalog"></div>
+        <div id="furnitureSelection" class="selection">Chưa chọn món nào.</div>
+        <div id="furnitureAssignmentWrap" hidden>
+          <label for="furnitureAssignment">Người ngồi bàn này</label>
+          <select id="furnitureAssignment"><option value="">— Bàn trống —</option></select>
+        </div>
+        <div class="btn-row">
+          <button id="furnitureRotate" class="secondary small" type="button" disabled>⟳ Xoay 90°</button>
+          <button id="furnitureDelete" class="danger small" type="button" disabled>Xoá</button>
+          <button id="furnitureReset" class="secondary small" type="button">↺ Mặc định</button>
+        </div>
+        <ul id="furnitureWarnings" class="warnings" hidden></ul>
+        <div id="furnitureHint" class="muted" aria-live="polite"></div>
+      </div>
+    </section>
+
+    <section class="drawer-section">
+      <h3>🖥️ Hiển thị &amp; thử nghiệm</h3>
+      <label class="check"><input type="checkbox" id="showReport" checked> Khung báo cáo (trái)</label>
+      <label class="check"><input type="checkbox" id="showSide" checked> Đội ngũ &amp; nhật ký (phải)</label>
+      <div class="btn-row">
+        <button id="runDemo" class="secondary small" type="button">▶ Chạy mô phỏng (không tốn API)</button>
+        <button id="replayIntro" class="secondary small" type="button">Xem lại màn chào</button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- Báo cáo (trái) -->
+  <section id="reportPanel" class="panel panel-left glass ui" aria-label="Báo cáo đầu tư">
+    <div class="panel-head">
+      <h2>📋 Báo cáo đầu tư</h2>
+      <div class="panel-actions">
+        <button id="copyResult" class="secondary small" type="button" disabled>Sao chép</button>
+        <button class="icon-btn small" type="button" data-collapse="report" aria-label="Thu gọn">–</button>
+      </div>
+    </div>
+    <div id="reportMeta" class="report-meta" hidden></div>
+    <article id="reportBody" class="report-body">
+      <p class="placeholder">Báo cáo sẽ xuất hiện ở đây sau khi Giám đốc đầu tư thẩm định và ký duyệt.</p>
+    </article>
+  </section>
+
+  <!-- Đội ngũ + nhật ký (phải) -->
+  <section id="sidePanel" class="panel panel-right glass ui" aria-label="Đội ngũ và nhật ký">
+    <div class="panel-head">
+      <h2>👥 Đội ngũ</h2>
+      <button class="icon-btn small" type="button" data-collapse="side" aria-label="Thu gọn">–</button>
+    </div>
+    <ul id="teamList" class="team-list"></ul>
+    <h2 class="sub">🕑 Nhật ký hoạt động</h2>
+    <ul id="activityLog" class="activity-log"></ul>
+  </section>
+
+  <button id="reportTab" class="panel-tab left ui" type="button" hidden aria-label="Mở báo cáo">📋</button>
+  <button id="sideTab" class="panel-tab right ui" type="button" hidden aria-label="Mở đội ngũ">👥</button>
+
+  <!-- Khung giao nhiệm vụ (giữa) -->
+  <section id="taskbar" class="taskbar glass ui" aria-label="Giao nhiệm vụ">
+    <div class="status-line" id="statusTag" role="status"><span id="statusMessage">Đang kết nối backend…</span></div>
+    <div class="task-row">
+      <textarea id="taskInput" rows="2" placeholder="Ví dụ: Phân tích cổ phiếu ngân hàng, tôi có 100 triệu, muốn đầu tư dài hạn 3 năm, chấp nhận rủi ro trung bình."></textarea>
+      <button id="missionButton" type="button" disabled>Giao việc</button>
+    </div>
+    <small class="muted">Ctrl + Enter để gửi · Báo cáo do AI tạo, chỉ mang tính tham khảo.</small>
+  </section>
+
+  <!-- Màn chào -->
+  <div id="intro" class="intro" hidden>
+    <div class="intro-inner">
+      <svg class="intro-mark" viewBox="0 0 120 120" aria-hidden="true">
+        <rect x="6" y="6" width="108" height="108" rx="26" class="mark-bg"/>
+        <polyline points="22,84 44,64 60,74 82,44 98,30" class="mark-line"/>
+        <circle cx="98" cy="30" r="5" class="mark-dot"/>
+      </svg>
+      <h1 class="intro-title"><span>Mini</span> <span>Capital</span></h1>
+      <p class="intro-tag">Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</p>
+      <p class="intro-hello">Xin chào, chào mừng Quý khách!</p>
+    </div>
+    <button id="introSkip" class="intro-skip" type="button">Bỏ qua ›</button>
+  </div>
+
+  <!-- Đơn cam kết -->
+  <div id="pledge" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="pledgeTitle">
+    <form id="pledgeForm" class="paper" novalidate>
+      <header class="letterhead">
+        <span class="logo">MC</span>
+        <div><strong>MINI CAPITAL</strong><small>Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small></div>
+        <span id="pledgeNo" class="doc-no"></span>
+      </header>
+      <h2 id="pledgeTitle">ĐƠN CAM KẾT SỬ DỤNG DỊCH VỤ</h2>
+      <p>Tôi, người ký tên dưới đây, xác nhận đã đọc và hiểu rõ:</p>
+      <ol class="terms">
+        <li>Toàn bộ nhân viên của Mini Capital là <strong>trợ lý AI</strong> (mô hình ngôn ngữ), không phải chuyên gia tài chính được cấp phép.</li>
+        <li>Báo cáo chỉ mang tính <strong>tham khảo</strong>, không phải lời khuyên đầu tư và không phải lời mời mua/bán chứng khoán.</li>
+        <li>AI <strong>không có dữ liệu thị trường thời gian thực</strong>; số liệu có thể lỗi thời, sai lệch hoặc bị AI suy diễn. Tôi sẽ tự kiểm chứng với nguồn chính thống trước khi quyết định.</li>
+        <li>Đầu tư cổ phiếu có rủi ro mất vốn. Tôi <strong>tự chịu trách nhiệm</strong> hoàn toàn với các quyết định đầu tư của mình.</li>
+        <li>Tôi không nhập thông tin nhạy cảm (mật khẩu, số tài khoản, giấy tờ tuỳ thân…). Nội dung yêu cầu sẽ được gửi tới nhà cung cấp AI đã chọn để xử lý.</li>
+        <li>Tên của tôi chỉ được lưu trên trình duyệt này để văn phòng xưng hô.</li>
+      </ol>
+
+      <div class="pledge-fields" id="pledgeFields">
+        <label for="clientName">Họ và tên khách hàng</label>
+        <input id="clientName" type="text" maxlength="60" autocomplete="name" placeholder="Nhập họ và tên của Quý khách" required>
+        <label class="check"><input type="checkbox" id="pledgeAgree"> Tôi đã đọc, hiểu và đồng ý với các điều trên.</label>
+        <p id="pledgeError" class="form-error" aria-live="assertive"></p>
+      </div>
+
+      <p class="date-line" id="pledgeDate"></p>
+      <div class="signatures">
+        <div class="sign-box">
+          <span class="sign-label">KHÁCH HÀNG<br><small>(ký, ghi rõ họ tên)</small></span>
+          <span id="clientSignature" class="signature"></span>
+          <span id="clientPrinted" class="printed"></span>
+        </div>
+        <div class="sign-box">
+          <span class="sign-label">ĐẠI DIỆN MINI CAPITAL<br><small>Giám đốc đầu tư (AI)</small></span>
+          <span id="officeSignature" class="signature written">Giám đốc AI</span>
+          <svg id="stamp" class="stamp" viewBox="0 0 140 140" aria-hidden="true">
+            <defs>
+              <path id="stampCircle" d="M70,70 m-50,0 a50,50 0 1,1 100,0 a50,50 0 1,1 -100,0"/>
+              <filter id="ink"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" result="n"/><feDisplacementMap in="SourceGraphic" in2="n" scale="2.4"/></filter>
+            </defs>
+            <g filter="url(#ink)">
+              <circle cx="70" cy="70" r="64" class="ring"/>
+              <circle cx="70" cy="70" r="40" class="ring thin"/>
+              <text class="ring-text"><textPath href="#stampCircle" startOffset="0">MINI CAPITAL ✦ VĂN PHÒNG ĐẦU TƯ AI ✦</textPath></text>
+              <text x="70" y="62" class="star">★</text>
+              <text x="70" y="82" class="center-text">ĐÃ DUYỆT</text>
+            </g>
+          </svg>
+          <span class="printed">Mini Capital</span>
+        </div>
+      </div>
+
+      <div class="pledge-actions">
+        <button id="pledgeSubmit" type="submit">✍️ Ký tên &amp; đóng dấu</button>
+        <button id="pledgeClose" class="secondary" type="button" hidden>Đóng</button>
+      </div>
+    </form>
+  </div>
+
+  <div id="toast" class="toast" hidden role="status"></div>
+
+  <script type="module" src="static/js/main.js"></script>
+</body>
+</html>
