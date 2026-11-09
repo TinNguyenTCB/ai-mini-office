@@ -67,12 +67,13 @@ let running = null;
 
 export function isDemoRunning() { return !!running; }
 
-export async function runDemo(emit, client) {
+export async function runDemo(emit, client, prompt = null) {
   if (running) return;
   const token = { cancelled: false };
   running = token;
   try {
-    for (const [wait, msg] of SCRIPT) {
+    for (const [wait, base] of SCRIPT) {
+      const msg = prompt && base.type === "job" ? { ...base, prompt: `[MÔ PHỎNG] ${prompt}`.slice(0, 140) } : base;
       if (wait) await new Promise(r => setTimeout(r, wait));
       if (token.cancelled) return;
       emit(msg);

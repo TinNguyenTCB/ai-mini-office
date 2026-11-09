@@ -599,11 +599,29 @@ function renderClient() {
 // ===========================================================================
 // Kết nối backend
 // ===========================================================================
-const SAME_ORIGIN = location.protocol.startsWith("http") && (location.port === "8000" || !location.port);
-const API_BASE = SAME_ORIGIN ? "" : "http://localhost:8000";
-const WS_URL = SAME_ORIGIN ? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws` : "ws://localhost:8000/ws";
+// Chọn máy chủ AI:
+//  - ?api=https://... trên URL  -> dùng máy chủ đó (khi sau này backend được triển khai lên mạng)
+//  - trang do chính backend phục vụ (cổng 8000) -> cùng nguồn
+//  - GitHub Pages / mở file trực tiếp -> KHÔNG có backend: chạy chế độ xem thử (mô phỏng)
+//  - trường hợp khác (vd. Live Server) -> backend ở localhost:8000
+const API_PARAM = new URLSearchParams(location.search).get("api");
+const STATIC_HOST = location.protocol === "file:" || /\.github\.io$/i.test(location.hostname);
+const SAME_ORIGIN = location.protocol.startsWith("http") && (location.port === "8000" || !location.port) && !STATIC_HOST;
+const API_BASE = API_PARAM ? API_PARAM.replace(/\/+$/, "")
+  : SAME_ORIGIN ? ""
+    : STATIC_HOST ? null
+      : "http://localhost:8000";
+const OFFLINE = API_BASE === null;
+const WS_URL = OFFLINE ? null
+  : API_BASE ? API_BASE.replace(/^http/, "ws") + "/ws"
+    : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
 const net = { socket: null, connected: false, busy: false, retry: 1000, modelsLoaded: false, submitting: false, jobStartedAt: 0, lastPrompt: "" };
+
+function idleStatus() {
+  if (OFFLINE) setStatus("Bản xem thử trên GitHub Pages – chưa có máy chủ AI. “Giao việc” sẽ chạy mô phỏng với dữ liệu hư cấu.", "busy");
+  else if (net.connected) setStatus(client ? `Sẵn sàng phục vụ Quý khách ${client.name}.` : "Đã kết nối.", "ok");
+}
 
 function setStatus(text, tone = "") {
   $("statusMessage").textContent = text;
@@ -613,11 +631,11 @@ function setStatus(text, tone = "") {
 function refreshControls() {
   const btn = $("missionButton");
   const busy = net.busy || isDemoRunning();
-  btn.disabled = !client || !net.connected || busy || net.submitting || !net.modelsLoaded;
-  btn.textContent = busy ? "⏳ Đang làm…" : net.submitting ? "Đang gửi…" : "Giao việc";
+  btn.disabled = !client || busy || net.submitting || (!OFFLINE && (!net.connected || !net.modelsLoaded));
+  btn.textContent = busy ? "⏳ Đang làm…" : net.submitting ? "Đang gửi…" : OFFLINE ? "Giao việc (mô phỏng)" : "Giao việc";
   btn.title = !client ? "Vui lòng ký Đơn cam kết trước" : "";
   $("connDot").dataset.on = String(net.connected);
-  $("connText").textContent = net.connected ? "Đã kết nối" : "Mất kết nối";
+  $("connText").textContent = OFFLINE ? "Bản xem thử" : net.connected ? "Đã kết nối" : "Mất kết nối";
   $("runDemo").disabled = busy;
 }
 
@@ -738,6 +756,12 @@ async function startMission() {
   if (!client) { setStatus("Quý khách cần ký Đơn cam kết trước khi giao việc.", "error"); return; }
   if (!prompt) { setStatus("Hãy nhập yêu cầu cho văn phòng trước đã.", "error"); $("taskInput").focus(); return; }
   if (net.busy || net.submitting || isDemoRunning()) return;
+  if (OFFLINE) {
+    toast("▶ Bản xem thử: chạy mô phỏng – không gọi AI, dữ liệu hư cấu");
+    runDemo(handleMessage, client.name, prompt).finally(refreshControls);
+    refreshControls();
+    return;
+  }
   net.submitting = true;
   refreshControls();
   try {
@@ -818,7 +842,7 @@ async function firstVisit({ withIntro = true } = {}) {
   await delay(4000);
   onboarding.greeting = false;
   flags.breaksPaused = false;
-  setStatus(net.connected ? `Sẵn sàng phục vụ Quý khách ${client.name}.` : $("statusMessage").textContent, net.connected ? "ok" : "error");
+  idleStatus();
   $("taskInput").focus();
 }
 
@@ -867,7 +891,16 @@ log("Văn phòng mở cửa.", "");
 const lastReport = store.get(REPORT_KEY, null);
 if (lastReport?.text) showReport(lastReport.text, lastReport.meta);
 layoutView();
-connect();
+if (OFFLINE) {
+  for (const id of ["leaderSelect", "workerSelect"]) {
+    $(id).replaceChildren(new Option("Không có máy chủ AI – chế độ mô phỏng", ""));
+    $(id).disabled = true;
+  }
+  idleStatus();
+  refreshControls();
+} else {
+  connect();
+}
 requestAnimationFrame(frame);
 if (client) returningVisit(); else firstVisit();
 
