@@ -89,18 +89,138 @@ function layoutView() {
   const bw = ROOM_BOX.x1 - ROOM_BOX.x0, bh = ROOM_BOX.y1 - ROOM_BOX.y0;
   const availW = Math.max(240, right - left), availH = Math.max(240, bottom - top);
   const scale = Math.min(availW / bw, availH / bh);
+  const ox = left + (availW - bw * scale) / 2 - ROOM_BOX.x0 * scale;
+  const oy = top + (availH - bh * scale) / 2 - ROOM_BOX.y0 * scale;
+  const cx = left + availW / 2, cy = top + availH / 2;
   Object.assign(view, {
-    dpr, w: W, h: H, scale,
-    ox: left + (availW - bw * scale) / 2 - ROOM_BOX.x0 * scale,
-    oy: top + (availH - bh * scale) / 2 - ROOM_BOX.y0 * scale,
+    dpr, w: W, h: H, scale, ox, oy, cx, cy, availW, availH,
+    home: { x: (cx - ox) / scale, y: (cy - oy) / scale }, // điểm logic nằm giữa vùng trống khi chưa zoom
   });
+  if (camera.focus === null) camera.focus = { ...view.home };
+  if (camera.follow) camera.targetZoom = followZoom();
+  // Cụm nút zoom nằm ở góc trên-phải của vùng trống, né khung bên và các nút 📋 / 👥 khi khung bị thu gọn.
+  const zc = $("zoomControls");
+  let zRight = right;
+  let zLeft = left;
+  if (visible($("sideTab"))) zRight = Math.min(zRight, $("sideTab").getBoundingClientRect().left - 8);
+  if (visible($("reportTab"))) zLeft = Math.max(zLeft, $("reportTab").getBoundingClientRect().right + 8);
+  let zTop = top + 2;
+  if (zRight - zc.offsetWidth < zLeft) {
+    // Màn hình quá hẹp để xếp cùng hàng với các nút: xuống hàng dưới.
+    zRight = W - 12;
+    zTop = Math.max($("sideTab").getBoundingClientRect().bottom, $("reportTab").getBoundingClientRect().bottom) + 8;
+  }
+  zc.style.left = `${Math.round(zRight - zc.offsetWidth)}px`;
+  zc.style.top = `${Math.round(zTop)}px`;
+}
+
+// ---------------------------------------------------------------------------
+// Camera: phóng to mượt vào một nhân viên (vd. Giám đốc khi chào khách) rồi thu nhỏ về.
+// Toạ độ màn hình = tâm vùng trống + (điểm logic − tiêu điểm) × scale × zoom.
+// Khi zoom = 1 và tiêu điểm = view.home thì trùng khít với khung nhìn bình thường.
+// ---------------------------------------------------------------------------
+const camera = { zoom: 1, targetZoom: 1, focus: null, follow: null, manual: null, speed: 2.2, pan: null };
+const ZOOM_MIN = 1, ZOOM_MAX = 4;
+
+// Đủ to để nhân vật + bong bóng thoại chiếm khoảng 2/3 chiều cao vùng trống.
+function followZoom() {
+  return Math.max(1.4, Math.min(3, (view.availH * 0.66) / (210 * view.scale)));
+}
+function focusTarget() {
+  if (!camera.follow) return camera.manual || view.home;
+  const a = staff[camera.follow];
+  const p = project(a.x, a.y);
+  return { x: p.x, y: p.y - 80 }; // hơi cao hơn đầu để chừa chỗ cho bong bóng thoại
+}
+function zoomTo(id) { camera.follow = id; camera.manual = null; camera.speed = 2.2; camera.targetZoom = followZoom(); }
+function zoomOut() { camera.follow = null; camera.manual = null; camera.speed = 2.2; camera.targetZoom = 1; }
+
+// ---- Người dùng tự phóng to / thu nhỏ / kéo ----
+// Giữ tiêu điểm trong phạm vi phòng để không kéo văn phòng ra khỏi màn hình.
+function clampFocus(f) {
+  return { x: Math.max(ROOM_BOX.x0, Math.min(ROOM_BOX.x1, f.x)), y: Math.max(ROOM_BOX.y0, Math.min(ROOM_BOX.y1, f.y)) };
+}
+// Phóng to/thu nhỏ quanh một điểm màn hình (sx, sy): điểm văn phòng nằm dưới con trỏ đứng yên.
+function zoomAt(sx, sy, factor) {
+  if (camera.follow) return; // đang có cảnh chào khách thì không giành camera
+  const z0 = camera.targetZoom;
+  const z1 = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, z0 * factor));
+  if (Math.abs(z1 - z0) < 1e-4) return;
+  const f0 = camera.manual || camera.focus;
+  const s0 = view.scale * z0, s1 = view.scale * z1;
+  const px = f0.x + (sx - view.cx) / s0, py = f0.y + (sy - view.cy) / s0;
+  camera.speed = 10;
+  camera.targetZoom = z1;
+  camera.manual = z1 <= ZOOM_MIN + 1e-3 ? null : clampFocus({ x: px - (sx - view.cx) / s1, y: py - (sy - view.cy) / s1 });
+  updateZoomUi();
+}
+function resetZoom() {
+  if (camera.follow) return;
+  camera.speed = 6;
+  camera.targetZoom = 1;
+  camera.manual = null;
+  updateZoomUi();
+}
+function updateZoomUi() {
+  $("zoomLevel").textContent = `${Math.round(camera.targetZoom * 100)}%`;
+  $("zoomOutBtn").disabled = camera.targetZoom <= ZOOM_MIN + 1e-3;
+  $("zoomInBtn").disabled = camera.targetZoom >= ZOOM_MAX - 1e-3;
+  canvas.classList.toggle("can-pan", camera.targetZoom > 1.001 && !editor.open);
+}
+
+canvas.addEventListener("wheel", event => {
+  event.preventDefault();
+  const delta = event.deltaMode === 1 ? event.deltaY * 33 : event.deltaY; // chuột "theo dòng" (Firefox)
+  zoomAt(event.clientX, event.clientY, Math.exp(-delta * 0.0015));
+}, { passive: false });
+canvas.addEventListener("dblclick", () => { if (!editor.open) resetZoom(); });
+canvas.addEventListener("contextmenu", event => { if (camera.pan || camera.targetZoom > 1) event.preventDefault(); });
+
+// Kéo để di chuyển khi đã phóng to: chuột trái (khi không sắp xếp nội thất), hoặc chuột phải/giữa (bất kỳ lúc nào).
+function startPan(event) {
+  const wantsPan = event.button === 1 || event.button === 2 || (event.button === 0 && !editor.open);
+  if (!wantsPan || camera.follow || camera.targetZoom <= 1.001) return false;
+  camera.pan = { x: event.clientX, y: event.clientY, id: event.pointerId };
+  camera.manual = camera.manual || { ...camera.focus };
+  canvas.setPointerCapture(event.pointerId);
+  canvas.classList.add("is-panning");
+  return true;
+}
+function movePan(event) {
+  if (!camera.pan) return false;
+  const s = view.scale * camera.zoom;
+  const next = clampFocus({
+    x: camera.manual.x - (event.clientX - camera.pan.x) / s,
+    y: camera.manual.y - (event.clientY - camera.pan.y) / s,
+  });
+  camera.manual = next;
+  camera.focus = { ...next }; // kéo thì bám tay ngay, không trễ
+  camera.pan.x = event.clientX;
+  camera.pan.y = event.clientY;
+  return true;
+}
+function endPan() {
+  if (!camera.pan) return false;
+  camera.pan = null;
+  canvas.classList.remove("is-panning");
+  return true;
+}
+
+function updateCamera(dt) {
+  const k = 1 - Math.exp(-dt * camera.speed); // chào khách: chậm (~1,4 giây); người dùng lăn chuột: nhanh
+  const t = focusTarget();
+  camera.zoom += (camera.targetZoom - camera.zoom) * k;
+  camera.focus.x += (t.x - camera.focus.x) * k;
+  camera.focus.y += (t.y - camera.focus.y) * k;
+  if (!camera.follow && !camera.manual && Math.abs(camera.zoom - 1) < 0.001) { camera.zoom = 1; camera.focus = { ...view.home }; }
 }
 window.addEventListener("resize", layoutView);
 new ResizeObserver(layoutView).observe(document.body);
 
 // Toạ độ chuột -> toạ độ logic của văn phòng.
 function canvasPoint(event) {
-  return { x: (event.clientX - view.ox) / view.scale, y: (event.clientY - view.oy) / view.scale };
+  const s = view.scale * camera.zoom;
+  return { x: camera.focus.x + (event.clientX - view.cx) / s, y: camera.focus.y + (event.clientY - view.cy) / s };
 }
 
 // ===========================================================================
@@ -247,7 +367,8 @@ const validAt = (item, at) => fitsInRoom(item, at) && !overlapsAny(item, layout,
 function setHint(text) { $("furnitureHint").textContent = text; }
 
 canvas.addEventListener("pointerdown", event => {
-  if (!editor.open) return;
+  if (startPan(event)) return;
+  if (!editor.open || event.button !== 0) return;
   const s = canvasPoint(event);
   const world = unproject(s.x, s.y);
   if (editor.placing) {
@@ -272,6 +393,7 @@ canvas.addEventListener("pointerdown", event => {
 });
 
 canvas.addEventListener("pointermove", event => {
+  if (movePan(event)) return;
   const world = unproject(...Object.values(canvasPoint(event)));
   editor.hover = world;
   if (!editor.drag) return;
@@ -292,8 +414,18 @@ function endDrag() {
   canvas.classList.remove("is-dragging");
   if (moved) commitLayout();
 }
-canvas.addEventListener("pointerup", endDrag);
-canvas.addEventListener("pointercancel", endDrag);
+canvas.addEventListener("pointerup", () => { endPan(); endDrag(); });
+canvas.addEventListener("pointercancel", () => { endPan(); endDrag(); });
+$("zoomInBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1.35));
+$("zoomOutBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1 / 1.35));
+$("zoomReset").addEventListener("click", resetZoom);
+document.addEventListener("keydown", event => {
+  const tag = document.activeElement?.tagName;
+  if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT" || !$("pledge").hidden) return;
+  if (event.key === "+" || event.key === "=") zoomAt(view.cx, view.cy, 1.25);
+  else if (event.key === "-" || event.key === "_") zoomAt(view.cx, view.cy, 1 / 1.25);
+  else if (event.key === "0") resetZoom();
+});
 canvas.addEventListener("pointerleave", () => { editor.hover = null; });
 
 function rotateSelection() {
@@ -323,6 +455,7 @@ function setEditing(on) {
   $("furnitureToggle").textContent = on ? "✓ Xong sắp xếp" : "Bật chế độ sắp xếp";
   canvas.classList.toggle("is-editing", on);
   renderEditor();
+  updateZoomUi();
 }
 
 $("furnitureRotate").addEventListener("click", rotateSelection);
@@ -411,8 +544,9 @@ function render() {
   g.addColorStop(1, "#040806");
   ctx.fillStyle = g;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const k = view.dpr * view.scale;
-  ctx.setTransform(k, 0, 0, k, view.dpr * view.ox, view.dpr * view.oy);
+  const s = view.scale * camera.zoom;
+  ctx.setTransform(view.dpr * s, 0, 0, view.dpr * s,
+    view.dpr * (view.cx - camera.focus.x * s), view.dpr * (view.cy - camera.focus.y * s));
 
   drawFloor();
   drawWalls(tick);
@@ -475,9 +609,11 @@ const STEP_MS = 1000 / TICK_HZ;
 let lastFrame = performance.now();
 let accumulator = 0;
 function frame(now) {
-  accumulator += Math.min(250, now - lastFrame);
+  const dt = Math.min(250, now - lastFrame);
+  accumulator += dt;
   lastFrame = now;
   while (accumulator >= STEP_MS) { update(); accumulator -= STEP_MS; }
+  updateCamera(dt / 1000);
   render();
   requestAnimationFrame(frame);
 }
@@ -821,7 +957,8 @@ async function firstVisit({ withIntro = true } = {}) {
   onboarding.greeting = true;
   runScript("manager", [
     { goto: GREET_SPOT, say: "Ồ, có khách!" },
-    { say: "Xin chào! Chào mừng Quý khách đến với Mini Capital.", face: "S", gesture: "wave" },
+    { call: () => zoomTo("manager") },
+    { say: "Xin chào! Chào mừng Quý khách đến với Mini Capital.", face: "S", gesture: "wave", seconds: 3.6 },
     { say: "Tôi là Giám đốc đầu tư. Đội ngũ AI của chúng tôi nghiên cứu cổ phiếu theo yêu cầu của Quý khách.", face: "S" },
     { say: "Trước khi bắt đầu, mời Quý khách đọc và ký Đơn cam kết.", face: "S", seconds: 2.6 },
     { call: () => readyForPledge() },
@@ -837,6 +974,7 @@ async function firstVisit({ withIntro = true } = {}) {
   runScript("manager", [
     { say: `Cảm ơn Quý khách ${client.name}! Rất hân hạnh được đồng hành cùng Quý khách.`, face: "S", gesture: "wave" },
     { say: "Mời Quý khách giao nhiệm vụ ở khung phía dưới.", face: "S", seconds: 3 },
+    { call: () => { zoomOut(); updateZoomUi(); } },
     { home: true },
   ]);
   await delay(4000);

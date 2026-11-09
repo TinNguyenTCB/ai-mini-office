@@ -342,7 +342,7 @@ export function drawAgent(agent, p, tick) {
 const ROLE_COLOR = { manager: "#d9b44a", analyst: "#b48ad6", quant: "#75d899", risk: "#e59a6b" };
 export const roleColor = id => ROLE_COLOR[id];
 
-function wrap(ctx, text, maxWidth) {
+function wrap(ctx, text, maxWidth, maxLines = 3) {
   const words = text.split(/\s+/);
   const lines = [];
   let line = "";
@@ -351,7 +351,7 @@ function wrap(ctx, text, maxWidth) {
     if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; } else line = test;
   }
   if (line) lines.push(line);
-  if (lines.length > 3) { lines.length = 3; lines[2] = lines[2].replace(/.{0,2}$/, "…"); }
+  if (lines.length > maxLines) { lines.length = maxLines; lines[maxLines - 1] = lines[maxLines - 1].replace(/.{0,2}$/, "…"); }
   return lines;
 }
 
@@ -389,7 +389,9 @@ export function drawOverlay(agent, p, bubble, taken = []) {
 
   if (!bubble) return;
   ctx.font = `600 10px ${FONT}`;
-  const lines = wrap(ctx, bubble.text, 140);
+  // Lời nói (speech) được hiển thị trọn câu; bong bóng trạng thái thì gọn 3 dòng.
+  const speech = bubble.tone === "speech";
+  const lines = wrap(ctx, bubble.text, speech ? 170 : 140, speech ? 8 : 3);
   const w = Math.max(...lines.map(l => ctx.measureText(l).width)) + 14;
   const h = lines.length * 12 + 7;
   const top = place(taken, x - w / 2, nameTop - 5 - h, w, h + 4);

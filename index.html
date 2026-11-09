@@ -111,6 +111,14 @@
     <ul id="activityLog" class="activity-log"></ul>
   </section>
 
+  <!-- Phóng to / thu nhỏ văn phòng -->
+  <div id="zoomControls" class="zoom-controls glass ui" role="group" aria-label="Thu phóng văn phòng">
+    <button id="zoomOutBtn" class="icon-btn small" type="button" aria-label="Thu nhỏ" title="Thu nhỏ ( - )">−</button>
+    <span id="zoomLevel" class="zoom-level" aria-live="polite">100%</span>
+    <button id="zoomInBtn" class="icon-btn small" type="button" aria-label="Phóng to" title="Phóng to ( + )">＋</button>
+    <button id="zoomReset" class="icon-btn small" type="button" aria-label="Về khung nhìn mặc định" title="Về mặc định ( 0 hoặc nhấp đúp )">⟲</button>
+  </div>
+
   <button id="reportTab" class="panel-tab left ui" type="button" hidden aria-label="Mở báo cáo">📋</button>
   <button id="sideTab" class="panel-tab right ui" type="button" hidden aria-label="Mở đội ngũ">👥</button>
 
@@ -121,7 +129,7 @@
       <textarea id="taskInput" rows="2" placeholder="Ví dụ: Phân tích cổ phiếu ngân hàng, tôi có 100 triệu, muốn đầu tư dài hạn 3 năm, chấp nhận rủi ro trung bình."></textarea>
       <button id="missionButton" type="button" disabled>Giao việc</button>
     </div>
-    <small class="muted">Ctrl + Enter để gửi · Báo cáo do AI tạo, chỉ mang tính tham khảo.</small>
+    <small class="muted">Ctrl + Enter để gửi · Lăn chuột để phóng to, kéo để di chuyển, nhấp đúp để về mặc định · Báo cáo do AI tạo, chỉ mang tính tham khảo.</small>
   </section>
 
   <!-- Màn chào -->

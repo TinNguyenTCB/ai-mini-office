@@ -33,6 +33,8 @@ h3 { font-size: 13px; color: var(--text); margin-bottom: 8px; }
 .muted { color: var(--muted); font-size: 12px; line-height: 1.5; }
 
 #officeCanvas { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; touch-action: none; }
+#officeCanvas.can-pan { cursor: grab; }
+#officeCanvas.is-panning { cursor: grabbing; }
 #officeCanvas.is-editing { cursor: pointer; }
 #officeCanvas.is-placing { cursor: crosshair; }
 #officeCanvas.is-dragging { cursor: grabbing; }
@@ -169,6 +171,13 @@ h2.sub { margin-top: 4px; }
 .activity-log li.error { border-left-color: var(--danger); color: #f4c7c1; }
 .activity-log li.empty { color: var(--muted); font-style: italic; border-left-color: transparent; }
 .activity-log time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
+
+/* ---------- Thu phóng ---------- */
+.zoom-controls {
+  position: fixed; z-index: 11; display: flex; align-items: center; gap: 4px;
+  padding: 4px; border-radius: 12px; top: 64px; left: 0; width: max-content;
+}
+.zoom-level { min-width: 44px; text-align: center; font-size: 12px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 /* ---------- Khung giao việc ---------- */
 .taskbar {
