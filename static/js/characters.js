@@ -373,7 +373,8 @@ export function drawAgent(agent, p, tick) {
 
   ctx.save();
   ctx.translate(Math.round(p.x), Math.round(p.y));
-  ctx.fillStyle = `rgba(0,0,0,${0.38 * (1 - agent.seatBlend * 0.5)})`;
+  // Bóng dưới chân: nhạt đi khi ngồi ghế, tắt hẳn khi ngồi sofa (người đã ở trên đệm, không đứng trên sàn).
+  ctx.fillStyle = `rgba(0,0,0,${0.38 * (1 - agent.seatBlend * (agent.sofaSeat ? 1 : 0.5))})`;
   ctx.beginPath();
   ctx.ellipse(0, 0, 12, 4.5, 0, 0, Math.PI * 2);
   ctx.fill();

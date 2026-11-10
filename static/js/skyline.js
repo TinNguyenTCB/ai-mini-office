@@ -599,20 +599,6 @@ function cityPieces(lang) {
   return { pieces: L, reserved };
 }
 
-// ---------------------------------------------------------------------------
-// Máy bay bay ngang phía trên thành phố
-// ---------------------------------------------------------------------------
-
-
-function planeShape() {
-  const P = piece(0, { alpha: 0.5, width: 0.8 });
-  P.shape([[-24, 0], [-18, -3], [18, -3], [24, 0], [18, 3], [-18, 3]]);
-  P.shape([[-2, -2], [8, -16], [12, -16], [6, -2]]);
-  P.shape([[-2, 2], [8, 14], [12, 14], [6, 2]]);
-  P.shape([[-20, -2], [-24, -10], [-20, -10], [-15, -2]]);
-  return P;
-}
-
 // Đoàn tàu: các toa hình hộp chạy dọc cao tốc (dựng lại mỗi khung vì vị trí đổi liên tục).
 const TRAIN = { vi: { cars: 3, len: 44, nose: false }, ja: { cars: 4, len: 50, nose: true }, en: { cars: 4, len: 40, nose: false } };
 function drawTrain(ctx, kind, axis, t) {
@@ -691,7 +677,6 @@ function paint(ctx, P) {
 
 const SEEDS = { vi: 7341, ja: 2207, en: 9113 };
 const cache = new Map();
-let plane = null;
 
 function build(lang) {
   const rnd = rng(SEEDS[lang] || SEEDS.vi);
@@ -740,7 +725,6 @@ export function drawSkyline(ctx, tick) {
   const lang = getLang();
   let c = cache.get(lang);
   if (!c) { c = build(lang); cache.set(lang, c); }
-  plane ??= planeShape();
   const m = ctx.getTransform();
   const key = `${lang}|${ctx.canvas.width}x${ctx.canvas.height}|${m.a.toFixed(4)}|${m.e.toFixed(1)}|${m.f.toFixed(1)}`;
 
@@ -753,12 +737,6 @@ export function drawSkyline(ctx, tick) {
   ctx.strokeStyle = GREEN;
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
-  // Máy bay bay chậm qua bầu trời
-  ctx.save();
-  ctx.translate(1700 - ((tick * 0.35) % 3200), -30 + Math.sin(tick * 0.004) * 6);
-  ctx.scale(-1, 1);
-  paint(ctx, plane);
-  ctx.restore();
   // Hai đoàn tàu trên hai cao tốc, chạy về phía người xem
   const len = SPAN[1] - SPAN[0] + 600;
   drawTrain(ctx, c.train, "x", SPAN[0] + ((tick * 1.1) % len));

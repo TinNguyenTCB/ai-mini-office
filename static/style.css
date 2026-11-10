@@ -98,6 +98,17 @@ button.small { padding: 6px 10px; font-size: 12px; }
   display: grid; place-items: center; width: 38px; height: 38px; padding: 0; font-size: 18px;
   background: rgba(16,30,21,.85); border: 1px solid var(--border); border-radius: 10px; flex: none;
 }
+/* ---------- Thanh cuộn: mảnh, tông xanh tối, đồng bộ với giao diện ---------- */
+/* Firefox dùng thuộc tính chuẩn; Chrome/Edge/Safari dùng ::-webkit-scrollbar (nếu đặt cả hai, Chrome bỏ kiểu webkit và hiện nút mũi tên). */
+@supports not selector(::-webkit-scrollbar) {
+  * { scrollbar-width: thin; scrollbar-color: rgba(117,216,153,.32) transparent; }
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(117,216,153,.24); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background: rgba(117,216,153,.45); background-clip: padding-box; }
+::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
+::-webkit-scrollbar-corner { background: transparent; }
 .icon-btn.small { width: 28px; height: 28px; padding: 0; font-size: 14px; border-radius: 8px; }
 .ico {
   display: block; width: 18px; height: 18px; flex: none;

@@ -227,15 +227,23 @@ function buildBookshelf(L, item) {
   L.box(0, 0, 64, 22, 3, 81, W, { edge: true });
   let seed = hash(item.id || "shelf");
   const rand = () => ((seed = Math.imul(seed ^ (seed >>> 15), 2246822507) >>> 0) % 1000) / 1000;
+  // Sách xếp sát nhau từ vách này sang vách kia (chỉ thấy gáy, như kệ thật),
+  // thỉnh thoảng cuối hàng có một chồng sách nằm ngang.
+  const pick = () => BOOK_COLORS[Math.floor(rand() * BOOK_COLORS.length)];
   for (const z of [5, 30.5, 58.5]) {
-    let u = -27;
-    while (u < 22) {
-      const w = 5 + Math.floor(rand() * 3);
-      const h = 15 + Math.floor(rand() * 7);
-      if (rand() > 0.12) {
-        L.box(u + w / 2, -1, w, 13, h, z, BOOK_COLORS[Math.floor(rand() * BOOK_COLORS.length)]);
+    let u = -29;
+    while (u < 28) {
+      // Chồng sách nằm chỉ đặt ở cuối hàng: nếu có sách đứng phía sau nó thì sẽ lộ cả mặt bìa.
+      if (29 - u >= 10 && 29 - u <= 14 && rand() < 0.45) {
+        const w = 10 + Math.floor(rand() * 3), n = 2 + Math.floor(rand() * 3);
+        for (let k = 0; k < n; k++) L.box(u + w / 2 + (k % 2 ? 0.6 : -0.4), -0.5, w - (k % 2), 13, 3, z + k * 3, pick());
+        u += w + 0.5;
+        continue;
       }
-      u += w + 1;
+      const w = Math.min(4 + Math.floor(rand() * 3), 29 - u);
+      if (w < 2.5) break;
+      L.box(u + w / 2, -0.5, w, 14, 17 + rand() * 3.5, z, pick());
+      u += w;
     }
   }
 }

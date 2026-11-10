@@ -102,8 +102,24 @@ export function screenBounds(b) {
 // Mỗi phần tử có bounds {x0,x1,y0,y1,z0,z1} và layer (dùng khi hai khối chồng lấn đáy).
 // Trả về thứ tự vẽ từ xa đến gần bằng sắp xếp topo – đúng cả với đồ lớn, khác với x+y của tâm.
 const EPS = 0.01;
+
+// Hình chiếu trên màn hình của một khối hộp (khung chữ nhật bao). Hai khối không chồng nhau trên màn hình
+// thì không cần quy định trước/sau – nếu vẫn ép thứ tự sẽ sinh vòng mâu thuẫn (A<B<C<A) làm vẽ đè sai.
+// Hình chiếu của khối hộp là lục giác có cạnh theo đúng 3 hướng (trục x, y, z chiếu xuống), nên kiểm tra
+// tách rời trên 3 trục pháp tuyến tương ứng là chính xác (định lý trục tách – SAT), không thừa như khung bao.
+function screenOverlap(A, B) {
+  const k2 = 2 * ISO.ky;
+  const apart = (a0, a1, b0, b1) => a1 <= b0 + EPS || b1 <= a0 + EPS;
+  const z0a = A.z0 || 0, z1a = A.z1 || 0, z0b = B.z0 || 0, z1b = B.z1 || 0;
+  if (apart(A.x0 - A.y1, A.x1 - A.y0, B.x0 - B.y1, B.x1 - B.y0)) return false;          // ⟂ trục z (ngang màn hình)
+  if (apart(z0a - k2 * A.y1, z1a - k2 * A.y0, z0b - k2 * B.y1, z1b - k2 * B.y0)) return false; // ⟂ trục x
+  if (apart(k2 * A.x0 - z1a, k2 * A.x1 - z0a, k2 * B.x0 - z1b, k2 * B.x1 - z0b)) return false; // ⟂ trục y
+  return true;
+}
+
 function compare(a, b) {
   const A = a.bounds, B = b.bounds;
+  if (!screenOverlap(A, B)) return 0;
   const overlapX = A.x0 < B.x1 - EPS && B.x0 < A.x1 - EPS;
   const overlapY = A.y0 < B.y1 - EPS && B.y0 < A.y1 - EPS;
   if (overlapX && overlapY) {
