@@ -125,6 +125,7 @@ const DICT = {
     "sim.findReports": "Tìm báo cáo tài chính", "sim.readAnnual": "Đọc báo cáo thường niên", "sim.print": "In báo cáo", "sim.printing": "Đang in…",
     "sim.handoffTo": "Bàn giao cho {name}", "sim.handoffDefault": "Phần của mình xong rồi nhé!", "sim.done": "Xong phần việc ✔",
     "sim.thinking": "💭 Đang suy nghĩ…", "sim.writing": "Đang viết…",
+    "printer.title": "Máy in", "printer.open": "Mở máy in", "printer.count": "{n} hồ sơ trong tủ · đã chọn {k}", "printer.empty": "Tủ hồ sơ đang trống. Hãy lưu báo cáo vào tủ trước khi in.", "printer.all": "Chọn tất cả", "printer.none": "Bỏ chọn", "printer.go": "In {k} hồ sơ", "printer.pick": "Chọn hồ sơ để in", "printer.hint": "Mẹo: bấm vào máy in trong văn phòng để mở danh sách in.", "printer.toast": "Giám đốc đang in {k} hồ sơ…", "printer.busy": "Máy in đang chạy, đợi chút nhé.", "print.kind": "Báo cáo nghiên cứu đầu tư", "print.client": "Khách hàng", "print.saved": "Lưu lúc", "print.printed": "In lúc", "print.info": "Thông tin", "print.footer": "Báo cáo do đội AI của Mini Capital soạn, chỉ mang tính tham khảo, không phải lời khuyên đầu tư.", "sim.toPrinter": "Ra máy in", "sim.printDone": "In xong rồi! 🖨️", "log.printed": "Đã in: {title}",
     "sim.toCabinet": "Cất vào tủ hồ sơ", "sim.filing": "🗂️ Lưu hồ sơ cẩn thận…", "sim.trashSay": "Bản này không cần nữa rồi…", "sim.crumple": "*sột soạt* 🤏", "sim.score": "Vào! 🗑️ Gọn gàng.", "sim.pocket": "Để lát bỏ thùng rác vậy.",
   },
 
@@ -240,6 +241,7 @@ const DICT = {
     "sim.findReports": "Finding financial reports", "sim.readAnnual": "Reading the annual report", "sim.print": "Printing the report", "sim.printing": "Printing…",
     "sim.handoffTo": "Handing over to {name}", "sim.handoffDefault": "My part is done!", "sim.done": "Part done ✔",
     "sim.thinking": "💭 Thinking…", "sim.writing": "Writing…",
+    "printer.title": "Printer", "printer.open": "Open printer", "printer.count": "{n} reports in the cabinet · {k} selected", "printer.empty": "The cabinet is empty. Save a report to the cabinet before printing.", "printer.all": "Select all", "printer.none": "Clear", "printer.go": "Print {k}", "printer.pick": "Select reports to print", "printer.hint": "Tip: click the printer in the office to open the print list.", "printer.toast": "The CIO is printing {k} report(s)…", "printer.busy": "The printer is busy, one moment.", "print.kind": "Investment research report", "print.client": "Client", "print.saved": "Saved", "print.printed": "Printed", "print.info": "Details", "print.footer": "Prepared by the Mini Capital AI team. For reference only; not investment advice.", "sim.toPrinter": "Off to the printer", "sim.printDone": "All printed! 🖨️", "log.printed": "Printed: {title}",
     "sim.toCabinet": "Filing the report", "sim.filing": "🗂️ Filed away neatly…", "sim.trashSay": "We won't need this one…", "sim.crumple": "*crinkle crinkle* 🤏", "sim.score": "Swish! 🗑️ Nice and tidy.", "sim.pocket": "I'll bin it later.",
   },
 
@@ -355,6 +357,7 @@ const DICT = {
     "sim.findReports": "財務報告書を探す", "sim.readAnnual": "年次報告書を読む", "sim.print": "レポートを印刷", "sim.printing": "印刷中…",
     "sim.handoffTo": "{name}へ引き継ぎ", "sim.handoffDefault": "私の分は終わりました！", "sim.done": "担当完了 ✔",
     "sim.thinking": "💭 考え中…", "sim.writing": "執筆中…",
+    "printer.title": "プリンター", "printer.open": "プリンターを開く", "printer.count": "キャビネット内 {n} 件 · {k} 件選択", "printer.empty": "キャビネットは空です。印刷する前にレポートを保存してください。", "printer.all": "すべて選択", "printer.none": "選択解除", "printer.go": "{k} 件を印刷", "printer.pick": "印刷するレポートを選択", "printer.hint": "ヒント：オフィスのプリンターをクリックすると印刷リストが開きます。", "printer.toast": "運用責任者が {k} 件を印刷しています…", "printer.busy": "印刷中です。少々お待ちください。", "print.kind": "投資リサーチレポート", "print.client": "お客様", "print.saved": "保存日時", "print.printed": "印刷日時", "print.info": "詳細", "print.footer": "Mini Capital の AI チームが作成。参考情報であり、投資助言ではありません。", "sim.toPrinter": "プリンターへ", "sim.printDone": "印刷完了！🖨️", "log.printed": "印刷しました：{title}",
     "sim.toCabinet": "書類をしまう", "sim.filing": "🗂️ きちんと保管…", "sim.trashSay": "これはもう要らないな…", "sim.crumple": "*くしゃくしゃ* 🤏", "sim.score": "ナイスシュート！🗑️", "sim.pocket": "後で捨てておこう。",
   },
 };

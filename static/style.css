@@ -233,6 +233,14 @@ button.danger.armed { background: #a3382f; border-color: #e0675a; animation: arm
 .cabinet-hint { font-size: 11.5px; }
 #officeCanvas.over-cabinet { cursor: pointer; }
 
+/* Máy in */
+.print-item { grid-template-columns: auto auto 1fr; cursor: pointer; user-select: none; }
+.print-item:hover { border-color: #2f5a3d; }
+.print-item.selected { border-color: rgba(117,216,153,.6); background: rgba(117,216,153,.08); }
+.print-item input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+.printer-foot { display: flex; gap: 8px; justify-content: flex-end; }
+.printer-foot #printerGo { min-width: 150px; }
+
 /* Đội ngũ */
 .team-list { list-style: none; display: grid; gap: 6px; }
 .team-row {

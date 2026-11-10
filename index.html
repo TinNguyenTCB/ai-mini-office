@@ -13,7 +13,7 @@
     Chữ hiển thị nằm trong static/js/i18n.js (các thuộc tính data-i18n*); chữ tiếng Việt ở đây chỉ là bản mặc định.
   -->
   <script>
-    window.APP_VERSION = "2026.11.10-12";
+    window.APP_VERSION = "2026.11.10-13";
     (function (v) {
       var modules = ["main", "iso", "furniture", "pathfinding", "characters", "sim", "dialogue", "markdown", "onboarding", "demo", "i18n", "icons", "skyline"];
       var imports = {};
@@ -150,6 +150,23 @@
       <p id="cabinetCount" class="muted"></p>
       <ul id="cabinetList" class="cabinet-list"></ul>
       <p class="muted cabinet-hint" data-i18n="cabinet.hint">Mẹo: bấm vào tủ hồ sơ cạnh bàn Giám đốc để mở tủ.</p>
+    </section>
+  </div>
+
+  <!-- Máy in: chọn hồ sơ đã lưu để in -->
+  <div id="printer" class="modal cabinet-modal" hidden>
+    <section class="cabinet-card glass" role="dialog" aria-modal="true" aria-labelledby="printerTitle">
+      <div class="panel-head">
+        <h2 id="printerTitle" class="ttl"><i data-icon="f-printer"></i><span data-i18n="printer.title">Máy in</span></h2>
+        <button id="printerClose" class="icon-btn small" type="button" data-i18n-aria-label="cabinet.close" aria-label="Đóng"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <p id="printerCount" class="muted"></p>
+      <ul id="printerList" class="cabinet-list"></ul>
+      <div class="printer-foot">
+        <button id="printerAll" class="secondary small" type="button"></button>
+        <button id="printerGo" class="small" type="button"></button>
+      </div>
+      <p class="muted cabinet-hint" data-i18n="printer.hint">Mẹo: bấm vào máy in trong văn phòng để mở danh sách in.</p>
     </section>
   </div>
 

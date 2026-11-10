@@ -8,7 +8,7 @@ import {
 import { nearestWalkable, rebuild, reachable } from "./pathfinding.js";
 import {
   ORDER, TICK_HZ, agentDrawables, applyActivity, applyHandoff, applyStatus, bubbleOf, effects, fileReportScene, flags,
-  getTick, lookAt, renameStaff, runScript, seatEveryone, setLayout, staff, trashReportScene, update,
+  getTick, lookAt, printReportScene, renameStaff, runScript, seatEveryone, setLayout, staff, trashReportScene, update,
 } from "./sim.js";
 import { drawAgent, drawOverlay, roleColor } from "./characters.js";
 import { duties, titles } from "./dialogue.js";
@@ -446,7 +446,7 @@ canvas.addEventListener("pointerdown", event => {
 
 canvas.addEventListener("pointermove", event => {
   if (movePan(event)) return;
-  if (!editor.open) canvas.classList.toggle("over-cabinet", itemAt(event)?.type === "cabinet");
+  if (!editor.open) canvas.classList.toggle("over-cabinet", CLICKABLE.has(itemAt(event)?.type));
   const world = unproject(...Object.values(canvasPoint(event)));
   editor.hover = world;
   if (!editor.drag) return;
@@ -472,7 +472,10 @@ canvas.addEventListener("pointerup", event => {
   endDrag();
   const c = clickStart;
   clickStart = null;
-  if (c && Math.hypot(event.clientX - c.x, event.clientY - c.y) < 5 && itemAt(event)?.type === "cabinet") openCabinet();
+  if (!c || Math.hypot(event.clientX - c.x, event.clientY - c.y) >= 5) return;
+  const type = itemAt(event)?.type;
+  if (type === "cabinet") openCabinet();
+  else if (type === "printer") openPrinter();
 });
 canvas.addEventListener("pointercancel", () => { endPan(); endDrag(); });
 $("zoomInBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1.35));
@@ -735,6 +738,7 @@ $("drawerClose").addEventListener("click", () => setDrawer(false));
 
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !$("cabinet").hidden) { closeCabinet(); return; }
+  if (event.key === "Escape" && !$("printer").hidden) { closePrinter(); return; }
   if (event.key === "Escape" && reportView.expanded) { setExpanded(false); return; }
   const tag = document.activeElement?.tagName;
   if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
@@ -962,6 +966,136 @@ function closeCabinet() { $("cabinet").hidden = true; }
 $("openCabinet").addEventListener("click", openCabinet);
 $("cabinetClose").addEventListener("click", closeCabinet);
 $("cabinet").addEventListener("click", event => { if (event.target === $("cabinet")) closeCabinet(); });
+
+const CLICKABLE = new Set(["cabinet", "printer"]);
+
+// ---- Máy in: chọn hồ sơ đã lưu, Giám đốc ra máy in, rồi mở hộp thoại in của trình duyệt ----
+const printSel = new Set();
+let printing = false;
+
+function renderPrinter() {
+  for (const id of [...printSel]) if (!archived(id)) printSel.delete(id);
+  $("printerCount").textContent = t("printer.count", { n: archive.length, k: printSel.size });
+  const go = $("printerGo"), all = $("printerAll");
+  go.disabled = !printSel.size || printing;
+  setLabel(go, "f-printer", printSel.size ? t("printer.go", { k: printSel.size }) : t("printer.pick"));
+  all.hidden = !archive.length;
+  const full = archive.length && printSel.size === archive.length;
+  setLabel(all, full ? "close" : "check", full ? t("printer.none") : t("printer.all"));
+  const list = $("printerList");
+  if (!archive.length) {
+    list.replaceChildren(Object.assign(document.createElement("li"), { className: "cabinet-empty", textContent: t("printer.empty") }));
+    return;
+  }
+  list.replaceChildren(...archive.map(entry => {
+    const li = document.createElement("li");
+    const on = printSel.has(entry.id);
+    li.className = `cabinet-item print-item${on ? " selected" : ""}`;
+    li.innerHTML = `<input type="checkbox"><span class="folder">${icon("report")}</span><div class="info"><strong></strong><small></small></div>`;
+    const box = li.querySelector("input");
+    box.checked = on;
+    box.setAttribute("aria-label", entry.title);
+    li.querySelector("strong").textContent = entry.title;
+    li.querySelector("small").textContent = `${fmtDateTime(new Date(entry.savedAt))}${entry.meta ? ` · ${entry.meta}` : ""}`;
+    li.querySelector("small").title = entry.meta || "";
+    const toggle = () => { if (printSel.has(entry.id)) printSel.delete(entry.id); else printSel.add(entry.id); renderPrinter(); };
+    box.addEventListener("click", event => { event.stopPropagation(); toggle(); });
+    li.addEventListener("click", toggle);
+    return li;
+  }));
+}
+function openPrinter() {
+  if (!$("pledge").hidden || editor.open) return;
+  closeCabinet();
+  renderPrinter();
+  $("printer").hidden = false;
+  $("printerClose").focus();
+}
+function closePrinter() { $("printer").hidden = true; }
+$("printerClose").addEventListener("click", closePrinter);
+$("printer").addEventListener("click", event => { if (event.target === $("printer")) closePrinter(); });
+$("printerAll").addEventListener("click", () => {
+  if (printSel.size === archive.length) printSel.clear(); else archive.forEach(e => printSel.add(e.id));
+  renderPrinter();
+});
+$("printerGo").addEventListener("click", () => {
+  const entries = archive.filter(e => printSel.has(e.id));
+  if (!entries.length) return;
+  if (printing) { toast(t("printer.busy"), 2500, "alert"); return; }
+  printing = true;
+  closePrinter();
+  toast(t("printer.toast", { k: entries.length }), 3000, "f-printer");
+  let done = false;
+  const go = () => {
+    if (done) return;
+    done = true;
+    printing = false;
+    entries.forEach(e => log(t("log.printed", { title: e.title }), "job"));
+    setTimeout(() => printDocument(entries), 0); // ra khỏi vòng cập nhật trước khi mở hộp thoại in (chặn luồng)
+  };
+  if (!managerFree() || !printReportScene(entries.length, go)) go();
+  setTimeout(go, 15000); // phòng khi Giám đốc bị kẹt đường
+});
+
+const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const PRINT_CSS = `
+  @page { size: A4; margin: 16mm 15mm 18mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #1d2a22; font: 10.5pt/1.55 "Be Vietnam Pro", "Segoe UI", "Yu Gothic UI", "Meiryo", Arial, sans-serif; }
+  .doc { break-after: page; }
+  .doc:last-child { break-after: auto; }
+  header { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 2.5px solid #2f7d4f; padding-bottom: 6px; }
+  .brand { font-weight: 800; letter-spacing: .14em; color: #2f7d4f; font-size: 13pt; }
+  .brand small { display: block; letter-spacing: .02em; font-weight: 500; color: #5b6b61; font-size: 8.5pt; }
+  .kind { font-size: 9pt; color: #5b6b61; text-transform: uppercase; letter-spacing: .08em; }
+  h1.title { font-size: 17pt; margin: 14px 0 8px; line-height: 1.3; }
+  table.info { border-collapse: collapse; margin: 0 0 14px; font-size: 9pt; color: #3c4a41; }
+  table.info td { padding: 2px 14px 2px 0; border: 0; }
+  table.info td:first-child { color: #6b7a70; }
+  .body h1 { font-size: 14pt; } .body h2 { font-size: 12.5pt; } .body h3 { font-size: 11pt; }
+  .body h1, .body h2, .body h3 { color: #24603d; margin: 14px 0 6px; break-after: avoid; }
+  .body p, .body li { orphans: 3; widows: 3; }
+  .body table { border-collapse: collapse; width: 100%; margin: 8px 0; font-size: 9pt; break-inside: avoid; }
+  .body th, .body td { border: 1px solid #b9c7bd; padding: 4px 6px; text-align: left; vertical-align: top; }
+  .body th { background: #e8f1ea; }
+  .body code { font-family: Consolas, monospace; font-size: 9pt; background: #f0f3f1; padding: 0 3px; }
+  .body blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid #9cc4a9; color: #3c4a41; }
+  footer { margin-top: 18px; padding-top: 6px; border-top: 1px solid #c9d4cc; font-size: 8pt; color: #6b7a70; }
+`;
+
+function printDocument(entries) {
+  const now = fmtDateTime();
+  const who = client ? clientName(client.name) : "";
+  const pages = entries.map(e => {
+    const rows = [
+      who && [t("print.client"), who],
+      [t("print.saved"), fmtDateTime(new Date(e.savedAt))],
+      [t("print.printed"), now],
+      e.meta && [t("print.info"), e.meta],
+    ].filter(Boolean).map(([k, v]) => `<tr><td>${escHtml(k)}</td><td>${escHtml(v)}</td></tr>`).join("");
+    return `<article class="doc">
+      <header><div class="brand">MINI CAPITAL<small>${escHtml(t("brand.tagline"))}</small></div><div class="kind">${escHtml(t("print.kind"))}</div></header>
+      <h1 class="title">${escHtml(e.title)}</h1>
+      <table class="info">${rows}</table>
+      <div class="body">${renderMarkdown(e.text)}</div>
+      <footer>${escHtml(t("print.footer"))}</footer>
+    </article>`;
+  }).join("");
+  const title = entries.length === 1 ? `Mini Capital - ${entries[0].title}` : `Mini Capital - ${t("print.kind")} (${entries.length})`;
+  const frame = document.createElement("iframe");
+  frame.setAttribute("aria-hidden", "true");
+  frame.style.cssText = "position:fixed;right:0;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none";
+  frame.srcdoc = `<!doctype html><html lang="${getLang()}"><head><meta charset="utf-8"><title>${escHtml(title)}</title><style>${PRINT_CSS}</style></head><body>${pages}</body></html>`;
+  frame.addEventListener("load", () => {
+    const w = frame.contentWindow;
+    const cleanup = () => setTimeout(() => frame.remove(), 500);
+    w.addEventListener("afterprint", cleanup, { once: true });
+    w.focus();
+    w.print();
+    setTimeout(() => frame.isConnected && frame.remove(), 60000);
+  }, { once: true });
+  document.body.append(frame);
+}
 
 function renderClient() {
   $("clientBadge").hidden = !client;
@@ -1296,6 +1430,7 @@ window.addEventListener("langchange", () => {
   renderClient();
   renderReportActions();
   if (!$("cabinet").hidden) renderCabinet();
+  if (!$("printer").hidden) renderPrinter();
   if (!net.busy && !isDemoRunning()) idleStatus();
 });
 

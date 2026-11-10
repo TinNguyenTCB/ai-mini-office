@@ -459,6 +459,23 @@ export function fileReportScene(onFiled) {
   return true;
 }
 
+// In hồ sơ: Giám đốc ra máy in, chờ in xong, cầm tập giấy về. onPrinted chạy lúc giấy ra khỏi máy.
+export function printReportScene(pages, onPrinted) {
+  const a = staff.manager;
+  const pr = nearestOfType(a, "printer");
+  const spot = pr && usePoint(pr) && nearestWalkable(usePoint(pr).x, usePoint(pr).y);
+  if (!pr || !spot || !reachable(a, spot)) { onPrinted?.(); return false; }
+  const secs = Math.min(5, 1.6 + pages * 0.7);
+  setPlan(a, "script", [
+    go(() => spot, { bubble: t("sim.toPrinter"), fast: true }),
+    wait(secs, { face: pr, bubble: t("sim.printing"), onStart: () => { printerUntil = tick + sec(secs); } }),
+    { type: "do", fn: () => onPrinted?.() },
+    wait(1.4, { face: "S", holding: "paper", bubble: t("sim.printDone"), tone: "speech", speak: true }),
+    home(),
+  ]);
+  return true;
+}
+
 // Điểm ném: đứng cách thùng rác ~50 đơn vị, ưu tiên phía chỗ ngồi của Giám đốc.
 function throwSpot(a, bin) {
   const from = homeTarget(a);
