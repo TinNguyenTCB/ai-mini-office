@@ -385,6 +385,10 @@ export function applyActivity(id, kind, message) {
   if (!a || !BUSY.has(a.serverStatus)) return;
   if (kind === "thinking") {
     a.statusBubble = { text: t("sim.thinking"), tone: "work" };
+  } else if (kind === "tool" || kind === "tool_error") {
+    // Đang tra dữ liệu thị trường: kính lúp + nhìn màn hình (gõ phím)
+    a.typingUntil = tick + sec(3);
+    a.statusBubble = { text: `${kind === "tool" ? "🔎" : "⚠️"} ${message}`, tone: kind === "tool" ? "work" : "error", until: tick + sec(6) };
   } else {
     a.typingUntil = tick + sec(4);
     a.statusBubble = { text: `⌨️ ${message || t("sim.writing")}`, tone: "work", until: tick + sec(5) };

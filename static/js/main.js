@@ -1042,6 +1042,9 @@ function handleMessage(msg) {
       break;
     case "activity":
       applyActivity(msg.agent, msg.kind, msg.message);
+      if (msg.kind === "tool" || msg.kind === "tool_error") {
+        log(`${titles()[msg.agent] || msg.agent}: ${msg.kind === "tool" ? "🔎" : "⚠️"} ${msg.message}`, msg.kind === "tool" ? "tool" : "error");
+      }
       break;
     case "handoff":
       applyHandoff(msg.from, msg.to);

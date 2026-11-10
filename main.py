@@ -12,6 +12,7 @@ import json
 import os
 import re
 import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
@@ -32,6 +33,9 @@ from crewai.events import (
     TaskStartedEvent,
     crewai_event_bus,
 )
+from crewai.events.types.tool_usage_events import ToolUsageErrorEvent, ToolUsageStartedEvent
+
+from market_tools import FinancialStatementsTool, StockSnapshotTool, data_tools_available
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -87,7 +91,13 @@ def build_llm(key: str) -> LLM:
     if spec["model"].startswith("gemini/"):
         # google-genai 3.x mặc định gọi API "v1", nơi KHÔNG có các model preview (vd. gemini-3.1-pro-preview)
         # -> 404 NOT_FOUND. "v1beta" có cả model ổn định lẫn preview.
-        extra["client_params"] = {"http_options": {"api_version": "v1beta"}}
+        # Máy chủ Gemini hay quá tải tạm thời (503) -> tự thử lại vài lần thay vì hỏng cả nhiệm vụ.
+        # Không thử lại 429 (hết hạn mức): thử lại cũng vô ích, để explain_error báo cho người dùng.
+        extra["client_params"] = {"http_options": {
+            "api_version": "v1beta",
+            "retry_options": {"attempts": 6, "initial_delay": 2.0, "max_delay": 45.0,
+                              "http_status_codes": [500, 502, 503, 504]},
+        }}
     return LLM(model=spec["model"], api_key=os.getenv(spec["env"]), **extra)
 
 
@@ -152,11 +162,31 @@ def short(text: Any, limit: int = 90) -> str:
 # ---------------------------------------------------------------------------
 # Đội ngũ & công việc
 # ---------------------------------------------------------------------------
-DATA_RULES = (
+DATA_RULES_OFFLINE = (
     "QUY TẮC DỮ LIỆU: Bạn KHÔNG có dữ liệu thị trường thời gian thực. Chỉ dùng kiến thức bạn chắc chắn, "
     "luôn ghi rõ mốc thời gian của số liệu (vd. 'theo BCTC 2024'), đánh dấu rõ số nào là ƯỚC TÍNH, "
     "và tuyệt đối không bịa giá cổ phiếu hay số liệu tài chính. Nếu không chắc, hãy nói là không chắc."
 )
+DATA_RULES_LIVE = (
+    "QUY TẮC DỮ LIỆU: Đội có công cụ tra dữ liệu thị trường (Yahoo Finance): 'stock_snapshot' (giá, chỉ số định giá, "
+    "biến động) và 'financial_statements' (báo cáo tài chính năm). Cổ phiếu sàn HOSE dùng mã có đuôi .VN (vd. VNM.VN), "
+    "Nhật dùng 4 số + .T (vd. 7203.T), Mỹ dùng mã gốc (vd. AAPL); sàn HNX/UPCoM KHÔNG có trong nguồn này. "
+    "Với mã cổ phiếu liên quan tới yêu cầu, HÃY dùng công cụ để lấy giá và chỉ số MỚI NHẤT thay vì dựa vào trí nhớ; "
+    "mỗi số liệu lấy từ công cụ phải ghi nguồn và thời điểm (vd. 'Yahoo Finance, ngày 2026-11-10'). "
+    "Thông tin công cụ không có (tin tức, sự kiện, kế hoạch kinh doanh...) chỉ dùng kiến thức bạn chắc chắn, ghi rõ mốc "
+    "thời gian và nói rõ có thể đã lỗi thời. Đánh dấu rõ số nào là ƯỚC TÍNH; tuyệt đối không bịa số liệu. "
+    "Nếu công cụ báo lỗi hoặc không có dữ liệu, hãy nói thẳng như vậy."
+)
+DATA_RULES = DATA_RULES_LIVE if data_tools_available() else DATA_RULES_OFFLINE
+# Giới hạn số lần tra mỗi người (mỗi lần tra là thêm lượt gọi AI -> tốn hạn mức API).
+TOOL_LIMIT = int(os.getenv("DATA_TOOL_LIMIT", "6"))
+
+
+def data_tools(*kinds: str) -> list:
+    if not data_tools_available():
+        return []
+    make = {"snapshot": StockSnapshotTool, "statements": FinancialStatementsTool}
+    return [make[k](max_usage_count=TOOL_LIMIT) for k in kinds]
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +209,11 @@ MSG = {
         "quota_min": "Gọi {models} quá nhanh so với hạn mức theo phút.{wait} Đợi một chút rồi gửi lại, hoặc giảm CREW_MAX_RPM trong .env.",
         "not_found": "Model {models} không tồn tại hoặc API key không có quyền dùng. Hãy chọn model khác.",
         "auth": "API key không hợp lệ hoặc không có quyền. Kiểm tra lại key trong .env rồi khởi động lại backend.",
+        "resuming": "Máy chủ AI đang quá tải – chờ {s} giây rồi làm tiếp từ bước này ({n}/{max})",
+        "no_credit": "Tài khoản API của {models} đã hết tiền/credit (không phải lỗi gọi quá nhanh). Hãy nạp thêm credit trong trang Billing của nhà cung cấp, hoặc chọn model của hãng khác.",
+        "overloaded": "Máy chủ {models} đang quá tải (đã tự thử lại nhưng chưa được). Đây là lỗi tạm thời phía nhà cung cấp – hãy gửi lại sau ít phút hoặc chọn model khác.",
+        "tool": {"stock_snapshot": "Tra giá & chỉ số {symbol}", "financial_statements": "Tra báo cáo tài chính {symbol}"},
+        "tool_error": "Tra cứu {symbol} không thành công",
     },
     "en": {
         "assigning": "Assigning tasks", "monitoring": "Tasks assigned, monitoring progress",
@@ -193,6 +228,11 @@ MSG = {
         "quota_min": "{models} was called faster than the per-minute quota allows.{wait} Wait a moment and resend, or lower CREW_MAX_RPM in .env.",
         "not_found": "Model {models} doesn't exist or the API key can't use it. Please choose another model.",
         "auth": "The API key is invalid or lacks permission. Check the key in .env and restart the backend.",
+        "resuming": "The AI servers are overloaded – waiting {s}s, then continuing from this step ({n}/{max})",
+        "no_credit": "The API account for {models} has no credits left (this is not a rate limit). Add credits on the provider's Billing page, or pick a model from another provider.",
+        "overloaded": "The {models} servers are overloaded (automatic retries didn't help). This is a temporary provider-side issue – resend in a few minutes or pick another model.",
+        "tool": {"stock_snapshot": "Looking up price & ratios for {symbol}", "financial_statements": "Looking up financial statements for {symbol}"},
+        "tool_error": "Lookup for {symbol} failed",
     },
     "ja": {
         "assigning": "タスクを割り振り中", "monitoring": "割り振り完了、進捗を確認中",
@@ -207,6 +247,11 @@ MSG = {
         "quota_min": "{models} の1分あたりの上限を超える速さで呼び出しました。{wait} 少し待ってから再送するか、.env の CREW_MAX_RPM を下げてください。",
         "not_found": "モデル {models} が存在しないか、APIキーで利用できません。別のモデルを選んでください。",
         "auth": "APIキーが無効か権限がありません。.env のキーを確認し、バックエンドを再起動してください。",
+        "resuming": "AIサーバーが混雑中 – {s}秒待ってからこの工程を再開します（{n}/{max}）",
+        "no_credit": "{models} のAPIアカウントのクレジットが残っていません（速度制限ではありません）。提供元の Billing ページでクレジットを追加するか、別のプロバイダーのモデルを選んでください。",
+        "overloaded": "{models} のサーバーが混雑しています（自動で再試行しましたが失敗）。提供元の一時的な問題です。数分後に再送するか、別のモデルを選んでください。",
+        "tool": {"stock_snapshot": "{symbol} の株価・指標を照会中", "financial_statements": "{symbol} の財務諸表を照会中"},
+        "tool_error": "{symbol} の照会に失敗しました",
     },
 }
 
@@ -225,18 +270,21 @@ def build_crew(prompt: str, leader_key: str, team_key: str, client: str, lang: s
         goal="Nghiên cứu cơ bản doanh nghiệp, ngành và bối cảnh vĩ mô liên quan tới yêu cầu của khách hàng",
         backstory="Chuyên viên phân tích cổ phiếu nhiều năm kinh nghiệm, đọc kỹ báo cáo tài chính và luôn ghi nguồn, mốc thời gian.",
         llm=team_llm,
+        tools=data_tools("snapshot", "statements"),
     )
     quant = Agent(
         role="Chuyên viên định lượng",
         goal="Lượng hoá định giá, kịch bản và đề xuất tỷ trọng phân bổ phù hợp khẩu vị rủi ro của khách hàng",
         backstory="Chuyên viên định lượng thận trọng, mọi con số đều kèm giả định rõ ràng và không bao giờ bịa dữ liệu.",
         llm=team_llm,
+        tools=data_tools("snapshot", "statements"),
     )
     risk = Agent(
         role="Quản trị rủi ro",
         goal="Phát hiện rủi ro, lỗ hổng lập luận và đặt quy tắc kiểm soát rủi ro cho khuyến nghị",
         backstory="Chuyên viên quản trị rủi ro khó tính, luôn hỏi 'nếu sai thì mất bao nhiêu?' và soi từng giả định.",
         llm=team_llm,
+        tools=data_tools("snapshot"),
     )
     manager = Agent(
         role="Giám đốc đầu tư",
@@ -248,9 +296,9 @@ def build_crew(prompt: str, leader_key: str, team_key: str, client: str, lang: s
     research = Task(
         description=(
             f"{brief}\n\nNhiệm vụ: nghiên cứu cơ bản – mô hình kinh doanh, vị thế cạnh tranh, tình hình tài chính "
-            "gần nhất bạn biết, động lực tăng trưởng, yếu tố ngành/vĩ mô/chính sách ảnh hưởng."
+            "gần nhất (tra bằng công cụ nếu có), động lực tăng trưởng, yếu tố ngành/vĩ mô/chính sách ảnh hưởng."
         ),
-        expected_output="Bản nghiên cứu cơ bản dạng gạch đầu dòng, mỗi số liệu có mốc thời gian.",
+        expected_output="Bản nghiên cứu cơ bản dạng gạch đầu dòng, mỗi số liệu có nguồn và mốc thời gian.",
         agent=analyst,
     )
     valuation = Task(
@@ -279,7 +327,9 @@ def build_crew(prompt: str, leader_key: str, team_key: str, client: str, lang: s
             "1) Tóm tắt khuyến nghị (Mua / Nắm giữ / Bán / Theo dõi) và mức độ tin cậy; 2) Luận điểm đầu tư; "
             "3) Định giá & kịch bản; 4) Kế hoạch phân bổ vốn; 5) Rủi ro & cách kiểm soát; 6) Việc khách hàng nên kiểm chứng thêm. "
             "Kết thúc bằng mục 'Miễn trừ trách nhiệm': báo cáo do AI tạo, không phải tư vấn đầu tư được cấp phép, "
-            "dữ liệu có thể lỗi thời, khách hàng tự chịu trách nhiệm với quyết định của mình."
+            "dữ liệu có thể lỗi thời, khách hàng tự chịu trách nhiệm với quyết định của mình. "
+            "Ngay trước mục đó, thêm mục 'Nguồn dữ liệu' liệt kê nguồn và thời điểm của các số liệu chính "
+            "(phần nào tra từ công cụ, phần nào chỉ dựa trên kiến thức của AI)."
         ),
         expected_output="Báo cáo đầu tư hoàn chỉnh bằng Markdown, có mục miễn trừ trách nhiệm.",
         agent=manager,
@@ -307,7 +357,10 @@ def explain_error(exc: Exception, leader_key: str, team_key: str, lang: str = "v
     M = MSG[lang]
     text = str(exc)
     models = " / ".join(dict.fromkeys(MODELS[k]["label"] for k in (leader_key, team_key)))
-    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
+    low = text.lower()
+    if "no credits" in low or "insufficient_quota" in low or "credit balance" in low or "billing" in low and "429" in text:
+        return M["no_credit"].format(models=models)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in low:
         retry = re.search(r"retry in (\d[\dhms.]*?)\.?\s|'retryDelay': '(\d+)s'", text + " ")
         wait = ""
         if retry:
@@ -315,11 +368,48 @@ def explain_error(exc: Exception, leader_key: str, team_key: str, lang: str = "v
             wait = M["retry_in"].format(wait=amount)
         key = "quota_day" if "PerDay" in text else "quota_min"
         return M[key].format(models=models, wait=wait)
+    if "503" in text or "UNAVAILABLE" in text or "overloaded" in text.lower():
+        return M["overloaded"].format(models=models)
     if "404" in text and "NOT_FOUND" in text:
         return M["not_found"].format(models=models)
     if "401" in text or "403" in text or "API key not valid" in text:
         return M["auth"]
     return short(f"{type(exc).__name__}: {exc}", 300)
+
+
+# Lỗi tạm thời phía nhà cung cấp (quá tải / lỗi máy chủ) – khác với hết hạn mức (429) hay sai key.
+TRANSIENT_MARKERS = ("503", "UNAVAILABLE", "overloaded", "500 INTERNAL", "502", "504", "timed out", "Timeout")
+RESUME_WAIT = int(os.getenv("RESUME_WAIT", "30"))   # giây chờ trước khi chạy tiếp
+RESUME_LIMIT = int(os.getenv("RESUME_LIMIT", "2"))  # số lần chạy tiếp tối đa cho một nhiệm vụ
+
+
+def is_transient(exc: Exception) -> bool:
+    text = str(exc)
+    return "429" not in text and any(m in text for m in TRANSIENT_MARKERS)
+
+
+def kickoff_with_resume(crew: Crew, task_ids: dict[int, str], M: dict) -> Any:
+    """Chạy cả đội; nếu gặp lỗi tạm thời giữa chừng thì chờ rồi chạy TIẾP từ bước hỏng.
+
+    Kết quả của các bước đã xong vẫn nằm trên đối tượng Task, và các bước sau đọc ngữ cảnh từ đó,
+    nên không phải làm lại từ đầu (đỡ tốn thời gian lẫn hạn mức API).
+    """
+    tasks = list(crew.tasks)
+    current, attempt = crew, 0
+    while True:
+        try:
+            return current.kickoff()
+        except Exception as exc:  # noqa: BLE001
+            remaining = [t for t in tasks if t.output is None]
+            if attempt >= RESUME_LIMIT or not remaining or not is_transient(exc):
+                raise
+            attempt += 1
+            sid = task_ids.get(id(remaining[0]))
+            if sid:
+                office.status(sid, "thinking", M["resuming"].format(s=RESUME_WAIT, n=attempt, max=RESUME_LIMIT))
+            time.sleep(RESUME_WAIT)
+            agents = list({id(t.agent): t.agent for t in remaining}.values())
+            current = Crew(agents=agents, tasks=remaining, process=Process.sequential, max_rpm=crew.max_rpm)
 
 
 def run_job(prompt: str, leader_key: str, team_key: str, client: str, lang: str = "vi") -> None:
@@ -382,6 +472,30 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str, lang: str
         if sid:
             office.emit({"type": "activity", "agent": sid, "kind": "thinking"})
 
+    def tool_event(event, key: str):
+        agent = getattr(event, "agent", None)
+        sid = agent_ids.get(id(agent)) or by_role(agent) or roles.get(getattr(event, "agent_role", None))
+        args = getattr(event, "tool_args", {}) or {}
+        if isinstance(args, str):
+            try:
+                args = json.loads(args)
+            except ValueError:
+                args = {"symbol": args}
+        symbol = short(str(args.get("symbol", "")), 20) if isinstance(args, dict) else ""
+        name = getattr(event, "tool_name", "")
+        text = M["tool"].get(name, name).format(symbol=symbol) if key == "start" else M["tool_error"].format(symbol=symbol)
+        return sid, text
+
+    def on_tool_started(source, event):
+        sid, text = tool_event(event, "start")
+        if sid:
+            office.emit({"type": "activity", "agent": sid, "kind": "tool", "message": text})
+
+    def on_tool_error(source, event):
+        sid, text = tool_event(event, "error")
+        if sid:
+            office.emit({"type": "activity", "agent": sid, "kind": "tool_error", "message": text})
+
     def on_llm_completed(source, event):
         sid = staff_of_llm(event)
         if sid:
@@ -394,12 +508,14 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str, lang: str
         (TaskFailedEvent, on_task_failed),
         (LLMCallStartedEvent, on_llm_started),
         (LLMCallCompletedEvent, on_llm_completed),
+        (ToolUsageStartedEvent, on_tool_started),
+        (ToolUsageErrorEvent, on_tool_error),
     ]
     for event_type, handler in handlers:
         crewai_event_bus.on(event_type)(handler)
 
     try:
-        output = crew.kickoff()
+        output = kickoff_with_resume(crew, task_ids, M)
         crewai_event_bus.flush(timeout=5)
     finally:
         for event_type, handler in handlers:

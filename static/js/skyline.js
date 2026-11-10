@@ -185,8 +185,34 @@ function officeTower() {
   P.line(S(x1, y1, GZ + 40), S(x1, y0, GZ + 40));
   P.shape([S(250, y1, GZ), S(310, y1, GZ), S(310, y1, GZ + 30), S(250, y1, GZ + 30)], false);
   P.line(S(280, y1, GZ), S(280, y1, GZ + 30));
-  faceText(P, "L", 120, y1, GZ + 47, "MINI CAPITAL", 13);
-  faceText(P, "R", x1, 300, -50, "MINI CAPITAL", 11);
+  return P;
+}
+
+// Biển dọc treo ở góc phải toà nhà (kiểu biển hiệu phố Nhật): tấm bảng chìa chéo 45° ra khỏi cạnh góc,
+// nên mặt bảng quay thẳng về phía người xem – chữ xếp dọc, không bị nghiêng.
+const SIGN_TEXT = { vi: "MINI CAPITAL", en: "MINI CAPITAL", ja: "ミニキャピタル" };
+function towerSign(lang) {
+  const P = piece(1e9 + 1, { alpha: 1, width: 1.1, glow: 0.3, group: "front" });
+  const { x1, y0 } = OFFICE;
+  const chars = [...(SIGN_TEXT[lang] || SIGN_TEXT.vi)].filter(c => c !== " ");
+  const size = lang === "ja" ? 15 : 12.5, step = lang === "ja" ? 19 : 13.5;
+  const top = -26, len = chars.length * step + 16, bot = top - len;
+  const gap = 8, out = 48, thick = 6, r2 = Math.SQRT1_2;
+  // a: khoảng cách chìa ra theo hướng chéo (1,-1); b: độ dày theo hướng (1,1) – hướng về người xem.
+  const W = (a, b, z) => S(x1 + (a + b) * r2, y0 + (b - a) * r2, z);
+  const a0 = gap, a1 = gap + out, bF = thick / 2, bB = -thick / 2;
+  // tay đỡ trên / dưới nối từ cạnh góc toà nhà
+  for (const z of [top - 7, bot + 7]) P.shape([W(0, 0, z), W(a0, 0, z), W(a0, 0, z - 3), W(0, 0, z - 3)]);
+  // nắp trên (mỏng) + mặt trước
+  P.shape([W(a0, bB, top), W(a1, bB, top), W(a1, bF, top), W(a0, bF, top)]);
+  P.shape([W(a0, bF, top), W(a1, bF, top), W(a1, bF, bot), W(a0, bF, bot)]);
+  const inset = 3.5;
+  P.shape([W(a0 + inset, bF, top - inset), W(a1 - inset, bF, top - inset), W(a1 - inset, bF, bot + inset), W(a0 + inset, bF, bot + inset)], false);
+  const cx = W((a0 + a1) / 2, bF, 0)[0];
+  chars.forEach((ch, i) => {
+    const yc = W((a0 + a1) / 2, bF, top - 8 - (i + 0.5) * step)[1];
+    P.texts.push({ screen: true, x: cx, y: yc - (size + 2) / 2, text: ch, size });
+  });
   return P;
 }
 
@@ -683,7 +709,7 @@ function build(lang) {
   const { pieces, reserved } = cityPieces(lang);
   // Công trình biểu tượng nằm sau cao tốc thì xếp vào lớp sau.
   for (const P of pieces) if (P.group === "front" && P.depth < HW.y * 2) P.group = "back";
-  const all = [groundPiece(), ...highways(), ...pieces, ...city(rnd, reserved), officeTower()];
+  const all = [groundPiece(), ...highways(), ...pieces, ...city(rnd, reserved), officeTower(), towerSign(lang)];
   all.sort((a, b) => a.depth - b.depth);
   return {
     back: all.filter(P => P.group === "back"),

@@ -254,6 +254,7 @@ button.danger.armed { background: #a3382f; border-color: #e0675a; animation: arm
 .activity-log li.handoff { border-left-color: var(--warn); }
 .activity-log li.job { border-left-color: var(--accent); }
 .activity-log li.error { border-left-color: var(--danger); color: #f4c7c1; }
+.activity-log li.tool { border-left-color: #5fb3e0; }
 .activity-log li.empty { color: var(--muted); font-style: italic; border-left-color: transparent; }
 .activity-log time { color: var(--muted); margin-right: 8px; font-variant-numeric: tabular-nums; }
 
