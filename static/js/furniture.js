@@ -11,6 +11,9 @@ export const runtime = {
   screenState: () => "off", // "off" | "idle" | "busy" | "typing"
   printerActive: () => false,
   boardInk: 0,
+  cabinetOpen: () => false, // ngăn tủ hồ sơ đang kéo ra
+  archiveCount: 0,          // số báo cáo đã lưu -> số tập hồ sơ xếp trên nóc tủ
+  trashCount: 0,            // số cục giấy trong thùng rác
 };
 
 export function rot(item) { return (((item.rotation || 0) % 4) + 4) % 4; }
@@ -362,6 +365,82 @@ function drawLeaves(p, variant) {
   });
 }
 
+// Tủ hồ sơ 4 ngăn bằng kim loại: ngăn trên cùng trượt ra khi Giám đốc cất báo cáo,
+// trên nóc tủ xếp chồng các tập hồ sơ theo số báo cáo đã lưu.
+const FOLDER_COLORS = ["#d9b44a", "#4f7cac", "#c0463a", "#5b8f5a", "#8a5a9e"];
+function buildCabinet(L) {
+  const body = "#7c8884";
+  L.box(0, 0, 28, 22, 2, 0, "#3a4240");
+  L.box(0, 0, 28, 22, 56, 2, body, {
+    edge: true,
+    decals: [0, 1, 2, 3].flatMap(i => {
+      const z0 = 4 + i * 13.5;
+      return [
+        { face: "pv", u0: -12.5, u1: 12.5, z0, z1: z0 + 12, color: "#8d9995" },
+        { face: "pv", u0: -4, u1: 4, z0: z0 + 8, z1: z0 + 10.5, color: "#efe9d6" },
+        { face: "pv", u0: -3, u1: 3, z0: z0 + 3.5, z1: z0 + 5, color: "#3a4240" },
+      ];
+    }),
+  });
+  // Ngăn kéo trên cùng (khi mở) + giấy bên trong
+  L.box(0, 17, 24, 12, 11, 45, "#8d9995", {
+    visible: () => runtime.cabinetOpen(),
+    decals: [
+      { face: "top", u0: -10, u1: 10, v0: -5, v1: 5, color: "#5e6a66" },
+      { face: "top", u0: -8, u1: 8, v0: -4, v1: 3, color: "#f1f0e8" },
+      { face: "pv", u0: -3, u1: 3, z0: 49, z1: 50.5, color: "#3a4240" },
+    ],
+  });
+  FOLDER_COLORS.forEach((color, i) => {
+    L.box(i % 2 ? 1.5 : -1, 0, 20, 15, 1.8, 58 + i * 1.9, color, { visible: () => runtime.archiveCount > i });
+  });
+}
+
+// Thùng rác lưới nhỏ cạnh bàn; cục giấy vo tròn chất dần lên miệng thùng.
+function buildTrash(L) {
+  L.box(0, 0, 14, 14, 18, 0, "#3f4b47", {
+    edge: true,
+    decals: [
+      { face: "top", u0: -5.5, u1: 5.5, v0: -5.5, v1: 5.5, color: "#1c2422" },
+      ...[-4, 0, 4].map(u => ({ face: "pv", u0: u - 0.6, u1: u + 0.6, z0: 2, z1: 16, color: "#566561" })),
+      ...[-4, 0, 4].map(u => ({ face: "pu", u0: u - 0.6, u1: u + 0.6, z0: 2, z1: 16, color: "#566561" })),
+    ],
+  });
+  L.custom(0, 0, 14, 14, 18, 26, p => drawPaperBalls(p, runtime.trashCount));
+}
+
+const BALL_SPOTS = [[-2, -1], [3, 0], [0, -4], [-4, -3], [2, -6]];
+function drawPaperBalls(p, n) {
+  const ctx = getContext();
+  for (let i = 0; i < Math.min(n, BALL_SPOTS.length); i++) {
+    const [dx, dy] = BALL_SPOTS[i];
+    drawPaperBall(ctx, p.x + dx, p.y + dy, 3, i * 1.7);
+  }
+}
+
+// Cục giấy vo tròn (dùng chung cho thùng rác và cục giấy đang bay).
+export function drawPaperBall(ctx, x, y, r, spin = 0) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(spin);
+  ctx.fillStyle = "#f4f1e6";
+  ctx.strokeStyle = "#a9a493";
+  ctx.lineWidth = 0.8;
+  ctx.beginPath();
+  for (let k = 0; k < 7; k++) {
+    const a = (k / 7) * Math.PI * 2;
+    const rr = r * (k % 2 ? 0.82 : 1.05);
+    if (k === 0) ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr); else ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.5, -r * 0.2); ctx.lineTo(r * 0.1, r * 0.25); ctx.lineTo(r * 0.5, -r * 0.3);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------------------
 // Danh mục
 // ---------------------------------------------------------------------------
@@ -375,6 +454,8 @@ export const CATALOG = {
   vending: { label: "Máy bán nước", icon: "🥤", w: 46, d: 32, h: 80, use: { u: 0, v: 32 }, build: buildVending },
   sofa: { label: "Sofa", icon: "🛋️", w: 84, d: 34, h: 38, use: { u: 0, v: 36 }, seats: [{ u: -18, v: 4 }, { u: 18, v: 4 }], build: buildSofa },
   plant: { label: "Cây cảnh", icon: "🪴", w: 22, d: 22, h: 52, build: buildPlant },
+  cabinet: { label: "Tủ hồ sơ", icon: "🗄️", w: 28, d: 22, h: 68, use: { u: -34, v: 26 }, build: buildCabinet },
+  trash: { label: "Thùng rác", icon: "🗑️", w: 14, d: 14, h: 26, build: buildTrash },
   chair: {
     label: "Ghế", icon: "🪑", w: 22, d: 22, h: 36,
     build: L => buildChairParts(L, 0, 0, -1, C.chair, "all"),
@@ -388,7 +469,8 @@ export const DEFAULT_LAYOUT = [
   { type: "plant", x: 185, y: 44 },
   { type: "printer", x: 385, y: 47, rotation: 0 },
   { type: "desk", x: 455, y: 125, rotation: 2, assignedTo: "manager" },
-  { type: "plant", x: 512, y: 44 },
+  { type: "cabinet", x: 512, y: 52, rotation: 0 },
+  { type: "trash", x: 410, y: 150, rotation: 0 },
   { type: "desk", x: 150, y: 275, rotation: 0, assignedTo: "analyst" },
   { type: "plant", x: 220, y: 262 },
   { type: "desk", x: 290, y: 275, rotation: 0, assignedTo: "quant" },

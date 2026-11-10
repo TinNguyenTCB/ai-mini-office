@@ -5,6 +5,7 @@
 // Mọi hướng "trái" (W, SW, NW) được vẽ bằng cách lật ngang hướng "phải" tương ứng.
 
 import { getContext, shade } from "./iso.js";
+import { drawPaperBall } from "./furniture.js";
 
 export const SCALE = 1.25;
 const BODY_Y = -27; // khoảng cách từ chân tới "thắt lưng" của sprite gốc
@@ -247,19 +248,80 @@ function farArm(ctx, L, s) {
   ctx.globalAlpha = 1;
 }
 
+// Vo giấy: hai tay ôm tờ giấy trước ngực, bóp dần thành cục tròn.
+const CRUMPLE_SECONDS = 1.3;
+function crumpleArms(ctx, L, s) {
+  const { x, y, view, holdT, tick } = s;
+  const sleeve = L.outfit.jacket, skin = L.skin;
+  const k = Math.min(1, holdT / CRUMPLE_SECONDS);
+  const sq = Math.abs(Math.sin(holdT * 13)) * 1.6 + k * 2; // tay bóp vào – nhả ra
+  const cx = view === "front34" ? x + 1 : x;
+  // Bắp tay
+  R(ctx, sleeve, x - 12, y - 6, 4, 8);
+  R(ctx, sleeve, view === "front34" ? x + 5 : x + 8, y - 6, 4, 8);
+  // Tờ giấy -> cục giấy
+  if (k < 0.75) {
+    const w = 11 - k * 7, h = 12 - k * 7;
+    const jx = Math.sin(tick * 0.9) * k, jy = Math.cos(tick * 1.1) * k;
+    ctx.save();
+    ctx.translate(cx + jx, y + 1 + jy);
+    ctx.rotate(Math.sin(holdT * 9) * 0.25 * k);
+    R(ctx, "#f7f7f0", -w / 2, -h / 2, w, h);
+    R(ctx, "#c9c6b8", -w / 2, -h / 2 + h * 0.35, w, 1);
+    R(ctx, "#c9c6b8", -w / 2 + w * 0.3, -h / 2, 1, h);
+    if (k > 0.3) { R(ctx, "#b7b3a3", -w / 2 + 1, -h / 2 + 1, w * 0.4, 1); R(ctx, "#b7b3a3", 0, h * 0.2, w * 0.4, 1); }
+    ctx.restore();
+  } else {
+    drawPaperBall(ctx, cx, y + 1, 4.4 - (k - 0.75) * 2, tick * 0.3);
+  }
+  // Cẳng tay + bàn tay khép vào giữa
+  R(ctx, sleeve, x - 11 + sq, y + 1, 6, 3); R(ctx, skin, cx - 7 + sq, y - 1, 3, 5);
+  R(ctx, sleeve, x + 5 - sq, y + 1, 6, 3); R(ctx, skin, cx + 4 - sq, y - 1, 3, 5);
+}
+
+// Cầm cục giấy / ném: một tay xoay quanh vai. "ball" = lấy đà ra sau, "throw" = vung tới trước.
+function throwAngle(s) {
+  if (s.holding === "ball") return -0.5 + Math.min(1, s.holdT / 0.3) * 3.1; // tay giơ dần ra sau đầu
+  const k = Math.min(1, s.holdT / 0.14);
+  return 2.6 - k * 4.0; // vung mạnh ra trước
+}
+function throwPivot(s) {
+  const { x, y, view } = s;
+  if (view === "side") return [x, y - 6];
+  if (view === "front") return [x + 10, y - 5];
+  return [x - 9, y - 5];
+}
+
 function nearArms(ctx, L, s) {
   const { x, y, view, arm, typing } = s;
   const sleeve = L.outfit.jacket, skin = L.skin;
   const waving = s.holding === "wave" && (view === "front" || view === "front34");
+  const standing = s.seat < 0.5;
+  if (standing && s.holding === "crumple" && (view === "front" || view === "front34")) {
+    crumpleArms(ctx, L, s);
+    return;
+  }
+  const throwing = standing && (s.holding === "ball" || s.holding === "throw");
   // Đứng / đi
   ctx.globalAlpha = 1 - s.seat;
-  if (view === "side") swingArm(ctx, x, y - 6, -arm * 0.09, sleeve, skin);
-  else if (view === "front34" || view === "back34") { R(ctx, sleeve, x - 11, y - 6 + arm * 0.6, 4, 12); R(ctx, skin, x - 11, y + 5 + arm * 0.6, 4, 4); }
+  if (view === "side") { if (!throwing) swingArm(ctx, x, y - 6, -arm * 0.09, sleeve, skin); }
+  else if (view === "front34" || view === "back34") { if (!throwing) { R(ctx, sleeve, x - 11, y - 6 + arm * 0.6, 4, 12); R(ctx, skin, x - 11, y + 5 + arm * 0.6, 4, 4); } }
   else {
     R(ctx, sleeve, x - 12, y - 6 + arm, 4, 12); R(ctx, skin, x - 12, y + 5 + arm, 4, 4);
-    if (!waving) { R(ctx, sleeve, x + 8, y - 6 - arm, 4, 12); R(ctx, skin, x + 8, y + 5 - arm, 4, 4); }
+    if (!waving && !throwing) { R(ctx, sleeve, x + 8, y - 6 - arm, 4, 12); R(ctx, skin, x + 8, y + 5 - arm, 4, 4); }
   }
   if (waving) swingArm(ctx, x + 9, y - 5, Math.PI - 0.5 + Math.sin(s.tick * 0.25) * 0.35, sleeve, skin, 11);
+  if (throwing) {
+    const a = throwAngle(s);
+    // Mặt "trước" của nhân vật quay về +x trong sprite (hướng trái được lật ngang), nên góc dương = ra sau lưng.
+    const [px, py] = throwPivot(s);
+    const sign = view === "front" ? -1 : 1;
+    swingArm(ctx, px, py, a * sign, sleeve, skin, 11);
+    if (s.holding === "ball") {
+      const hx = px - Math.sin(a * sign) * 13, hy = py + Math.cos(a * sign) * 13;
+      drawPaperBall(ctx, hx, hy, 3.6, s.tick * 0.2);
+    }
+  }
   // Ngồi gõ phím
   ctx.globalAlpha = s.seat;
   if (view === "front") {
@@ -282,6 +344,7 @@ function nearArms(ctx, L, s) {
 function heldItem(ctx, s) {
   const { x, y, view, holding, tick } = s;
   if (!holding || holding === "wave" || view === "back" || view === "back34") return;
+  if (holding === "crumple" || holding === "ball" || holding === "throw") return; // vẽ trong nearArms
   const hx = view === "side" ? x + 6 : view === "front34" ? x + 7 : x + 9;
   if (holding === "cup") {
     const sip = Math.sin(tick * 0.09) > 0.82 ? -5 : 0;
@@ -320,6 +383,7 @@ export function drawAgent(agent, p, tick) {
     x: 0,
     y: BODY_Y + (moving ? -Math.abs(Math.sin(tick * 0.22)) : Math.sin(tick * 0.04) * 0.5) + agent.seatBlend * 5 - agent.lift / SCALE,
     view, step, arm, tick, seat: agent.seatBlend, holding: agent.holding, talking: agent.talking,
+    holdT: (tick - (agent.holdStart ?? tick)) / 60,
     typing: working ? Math.abs(Math.sin(tick * 0.35)) * 1.5 : Math.sin(tick * 0.07) * 0.5,
     blink: (tick + Math.round(agent.animationSeed)) % 280 > 273,
     faceShadow: shade(L.skin, -0.22), faceLight: shade(L.skin, 0.12),

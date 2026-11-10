@@ -10,11 +10,12 @@
   <!--
     Chống "trộn bản cũ – bản mới": GitHub Pages cho trình duyệt giữ file 10 phút, nên CSS/JS cũ có thể
     chạy cùng index.html mới. Mọi file được tải kèm ?v=APP_VERSION – ĐỔI SỐ NÀY MỖI LẦN PHÁT HÀNH.
+    Chữ hiển thị nằm trong static/js/i18n.js (các thuộc tính data-i18n*); chữ tiếng Việt ở đây chỉ là bản mặc định.
   -->
   <script>
-    window.APP_VERSION = "2026.11.09-4";
+    window.APP_VERSION = "2026.11.10-8";
     (function (v) {
-      var modules = ["main", "iso", "furniture", "pathfinding", "characters", "sim", "dialogue", "markdown", "onboarding", "demo"];
+      var modules = ["main", "iso", "furniture", "pathfinding", "characters", "sim", "dialogue", "markdown", "onboarding", "demo", "i18n", "icons", "skyline"];
       var imports = {};
       modules.forEach(function (name) {
         var url = new URL("static/js/" + name + ".js", location.href).href;
@@ -37,64 +38,69 @@
   </script>
 </head>
 <body class="booting">
-  <canvas id="officeCanvas" aria-label="Văn phòng Mini Capital"></canvas>
+  <canvas id="officeCanvas" data-i18n-aria-label="a11y.office" aria-label="Văn phòng Mini Capital"></canvas>
 
   <!-- Thanh trên cùng -->
   <header class="topbar ui">
-    <button id="menuButton" class="icon-btn" type="button" aria-label="Mở menu" aria-expanded="false" aria-controls="drawer">☰</button>
+    <button id="menuButton" class="icon-btn" type="button" data-i18n-aria-label="a11y.openMenu" aria-label="Mở menu" aria-expanded="false" aria-controls="drawer"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
     <div class="brand">
       <span class="logo" aria-hidden="true">MC</span>
       <div>
         <strong>Mini Capital</strong>
-        <small>Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small>
+        <small data-i18n="brand.tagline">Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small>
       </div>
     </div>
     <div class="topbar-right">
       <span id="clientBadge" class="client-badge" hidden></span>
-      <span class="conn" title="Kết nối backend"><span class="dot" id="connDot" data-on="false"></span><span id="connText">Đang kết nối…</span></span>
+      <span class="conn" data-i18n-title="conn.title" title="Kết nối backend"><span class="dot" id="connDot" data-on="false"></span><span id="connText">Đang kết nối…</span></span>
     </div>
   </header>
 
   <!-- Menu ☰ -->
   <aside id="drawer" class="drawer glass ui" aria-label="Menu" hidden>
     <div class="drawer-head">
-      <h2>Menu</h2>
-      <button id="drawerClose" class="icon-btn small" type="button" aria-label="Đóng menu">✕</button>
+      <h2 data-i18n="menu.title">Menu</h2>
+      <button id="drawerClose" class="icon-btn small" type="button" data-i18n-aria-label="menu.close" aria-label="Đóng menu"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
     </div>
 
     <section class="drawer-section">
-      <h3>⚙️ Cài đặt AI</h3>
-      <label for="leaderSelect">Giám đốc đầu tư</label>
-      <select id="leaderSelect"><option>Đang tải…</option></select>
-      <label for="workerSelect">Đội phân tích (3 chuyên viên)</label>
-      <select id="workerSelect"><option>Đang tải…</option></select>
-      <p class="muted">Model thiếu API key trong <code>.env</code> sẽ bị khoá.</p>
+      <h3 class="ttl"><i data-icon="globe"></i><span data-i18n="menu.language">Ngôn ngữ</span></h3>
+      <select id="langSelect" aria-label="Language / Ngôn ngữ / 言語"></select>
     </section>
 
     <section class="drawer-section">
-      <h3>👤 Khách hàng</h3>
+      <h3 class="ttl"><i data-icon="settings"></i><span data-i18n="menu.ai">Cài đặt AI</span></h3>
+      <label for="leaderSelect" data-i18n="menu.leaderModel">Giám đốc đầu tư</label>
+      <select id="leaderSelect"><option data-i18n="common.loading">Đang tải…</option></select>
+      <label for="workerSelect" data-i18n="menu.teamModel">Đội phân tích (3 chuyên viên)</label>
+      <select id="workerSelect"><option data-i18n="common.loading">Đang tải…</option></select>
+      <p class="muted" data-i18n-html="menu.modelHint">Model thiếu API key trong <code>.env</code> sẽ bị khoá.</p>
+    </section>
+
+    <section class="drawer-section">
+      <h3 class="ttl"><i data-icon="user"></i><span data-i18n="menu.client">Khách hàng</span></h3>
       <p id="clientInfo" class="muted">Chưa ký đơn cam kết.</p>
       <div class="btn-row">
-        <button id="viewPledge" class="secondary small" type="button">Xem đơn cam kết</button>
-        <button id="resignPledge" class="secondary small" type="button">Ký lại tên khác</button>
+        <button id="viewPledge" class="secondary small has-ico" type="button"><i data-icon="report"></i><span data-i18n="client.viewPledge">Xem đơn cam kết</span></button>
+        <button id="resignPledge" class="secondary small has-ico" type="button"><i data-icon="pen"></i><span data-i18n="client.resign">Ký lại tên khác</span></button>
       </div>
     </section>
 
     <section class="drawer-section">
-      <h3>🪑 Nội thất</h3>
+      <h3 class="ttl"><i data-icon="f-chair"></i><span data-i18n="menu.furniture">Nội thất</span></h3>
       <button id="furnitureToggle" class="secondary" type="button" aria-expanded="false">Bật chế độ sắp xếp</button>
       <div id="furnitureEditor" class="furniture-editor" hidden>
-        <p class="muted">Chọn món rồi bấm lên sàn để đặt. Kéo để di chuyển · <kbd>R</kbd> xoay · <kbd>Del</kbd> xoá · <kbd>Esc</kbd> huỷ. <span id="furnitureCount"></span></p>
+        <p class="muted"><span data-i18n-html="furn.help">Chọn món rồi bấm lên sàn để đặt.</span> <span id="furnitureCount"></span></p>
         <div id="furnitureCatalog" class="furniture-catalog"></div>
-        <div id="furnitureSelection" class="selection">Chưa chọn món nào.</div>
+        <div id="furnitureSelection" class="selection"></div>
         <div id="furnitureAssignmentWrap" hidden>
-          <label for="furnitureAssignment">Người ngồi bàn này</label>
-          <select id="furnitureAssignment"><option value="">— Bàn trống —</option></select>
+          <label for="furnitureAssignment" data-i18n="furn.seatedLabel">Người ngồi bàn này</label>
+          <select id="furnitureAssignment"></select>
         </div>
         <div class="btn-row">
-          <button id="furnitureRotate" class="secondary small" type="button" disabled>⟳ Xoay 90°</button>
-          <button id="furnitureDelete" class="danger small" type="button" disabled>Xoá</button>
-          <button id="furnitureReset" class="secondary small" type="button">↺ Mặc định</button>
+          <button id="furnitureRotate" class="secondary small has-ico" type="button" disabled><i data-icon="rotate"></i><span data-i18n="furn.rotate">Xoay 90°</span></button>
+          <button id="furnitureDelete" class="danger small has-ico" type="button" disabled><i data-icon="trash"></i><span data-i18n="furn.delete">Xoá</span></button>
+          <button id="furnitureReset" class="secondary small has-ico" type="button"><i data-icon="reset"></i><span data-i18n="furn.reset">Mặc định</span></button>
         </div>
         <ul id="furnitureWarnings" class="warnings" hidden></ul>
         <div id="furnitureHint" class="muted" aria-live="polite"></div>
@@ -102,64 +108,84 @@
     </section>
 
     <section class="drawer-section">
-      <h3>🖥️ Hiển thị &amp; thử nghiệm</h3>
-      <label class="check"><input type="checkbox" id="showReport" checked> Khung báo cáo (trái)</label>
-      <label class="check"><input type="checkbox" id="showSide" checked> Đội ngũ &amp; nhật ký (phải)</label>
+      <h3 class="ttl"><i data-icon="monitor"></i><span data-i18n="menu.display">Hiển thị &amp; thử nghiệm</span></h3>
+      <label class="check"><input type="checkbox" id="showReport" checked> <span data-i18n="menu.showReport">Khung báo cáo (trái)</span></label>
+      <label class="check"><input type="checkbox" id="showSide" checked> <span data-i18n="menu.showSide">Đội ngũ &amp; nhật ký (phải)</span></label>
       <div class="btn-row">
-        <button id="runDemo" class="secondary small" type="button">▶ Chạy mô phỏng (không tốn API)</button>
-        <button id="replayIntro" class="secondary small" type="button">Xem lại màn chào</button>
+        <button id="runDemo" class="secondary small has-ico" type="button"><i data-icon="play"></i><span data-i18n="menu.runDemo">Chạy mô phỏng (không tốn API)</span></button>
+        <button id="replayIntro" class="secondary small has-ico" type="button"><i data-icon="smile"></i><span data-i18n="menu.replayIntro">Xem lại màn chào</span></button>
       </div>
     </section>
   </aside>
 
   <!-- Báo cáo (trái) -->
-  <section id="reportPanel" class="panel panel-left glass ui" aria-label="Báo cáo đầu tư">
+  <section id="reportPanel" class="panel panel-left glass ui" data-i18n-aria-label="report.title" aria-label="Báo cáo đầu tư">
     <div class="panel-head">
-      <h2>📋 Báo cáo đầu tư</h2>
+      <h2 class="ttl"><i data-icon="report"></i><span data-i18n="report.title">Báo cáo đầu tư</span></h2>
       <div class="panel-actions">
-        <button id="copyResult" class="secondary small" type="button" disabled>Sao chép</button>
-        <button class="icon-btn small" type="button" data-collapse="report" aria-label="Thu gọn">–</button>
+        <button id="openCabinet" class="icon-btn small" type="button" data-i18n-aria-label="cabinet.open" data-i18n-title="cabinet.open" aria-label="Mở tủ hồ sơ" title="Mở tủ hồ sơ"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M5 9h14M5 15h14M10.5 6h3M10.5 12h3M10.5 18h3"/></svg></button>
+        <button id="reportExpand" class="icon-btn small" type="button" data-i18n-aria-label="report.expand" data-i18n-title="report.expand" aria-label="Phóng to toàn màn hình" title="Phóng to toàn màn hình" aria-pressed="false"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        <button class="icon-btn small" type="button" data-collapse="report" data-i18n-aria-label="a11y.collapse" aria-label="Thu gọn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
       </div>
     </div>
     <div id="reportMeta" class="report-meta" hidden></div>
     <article id="reportBody" class="report-body">
-      <p class="placeholder">Báo cáo sẽ xuất hiện ở đây sau khi Giám đốc đầu tư thẩm định và ký duyệt.</p>
+      <p class="placeholder" data-i18n="report.placeholder">Báo cáo sẽ xuất hiện ở đây sau khi Giám đốc đầu tư thẩm định và ký duyệt.</p>
     </article>
+    <div id="reportFoot" class="report-foot" hidden>
+      <button id="copyResult" class="secondary small has-ico" type="button" disabled data-i18n-title="report.copy" title="Sao chép"><i data-icon="copy"></i><span data-i18n="report.copy">Sao chép</span></button>
+      <button id="saveReport" class="small has-ico" type="button"></button>
+      <button id="deleteReport" class="danger small has-ico" type="button"></button>
+    </div>
   </section>
+  <div id="reportBackdrop" class="report-backdrop" hidden></div>
+
+  <!-- Tủ hồ sơ: các báo cáo đã lưu -->
+  <div id="cabinet" class="modal cabinet-modal" hidden>
+    <section class="cabinet-card glass" role="dialog" aria-modal="true" aria-labelledby="cabinetTitle">
+      <div class="panel-head">
+        <h2 id="cabinetTitle" class="ttl"><i data-icon="cabinet"></i><span data-i18n="cabinet.title">Tủ hồ sơ</span></h2>
+        <button id="cabinetClose" class="icon-btn small" type="button" data-i18n-aria-label="cabinet.close" aria-label="Đóng"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <p id="cabinetCount" class="muted"></p>
+      <ul id="cabinetList" class="cabinet-list"></ul>
+      <p class="muted cabinet-hint" data-i18n="cabinet.hint">Mẹo: bấm vào tủ hồ sơ cạnh bàn Giám đốc để mở tủ.</p>
+    </section>
+  </div>
 
   <!-- Đội ngũ + nhật ký (phải) -->
-  <section id="sidePanel" class="panel panel-right glass ui" aria-label="Đội ngũ và nhật ký">
+  <section id="sidePanel" class="panel panel-right glass ui" data-i18n-aria-label="team.title" aria-label="Đội ngũ">
     <div class="panel-head">
-      <h2>👥 Đội ngũ</h2>
-      <button class="icon-btn small" type="button" data-collapse="side" aria-label="Thu gọn">–</button>
+      <h2 class="ttl"><i data-icon="team"></i><span data-i18n="team.title">Đội ngũ</span></h2>
+      <button class="icon-btn small" type="button" data-collapse="side" data-i18n-aria-label="a11y.collapse" aria-label="Thu gọn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
     </div>
     <ul id="teamList" class="team-list"></ul>
-    <h2 class="sub">🕑 Nhật ký hoạt động</h2>
+    <h2 class="sub ttl"><i data-icon="clock"></i><span data-i18n="log.title">Nhật ký hoạt động</span></h2>
     <ul id="activityLog" class="activity-log"></ul>
   </section>
 
   <!-- Phóng to / thu nhỏ văn phòng -->
-  <div id="zoomControls" class="zoom-controls glass ui" role="group" aria-label="Thu phóng văn phòng">
-    <button id="zoomOutBtn" class="icon-btn small" type="button" aria-label="Thu nhỏ" title="Thu nhỏ ( - )">−</button>
+  <div id="zoomControls" class="zoom-controls glass ui" role="group" data-i18n-aria-label="zoom.group" aria-label="Thu phóng văn phòng">
+    <button id="zoomOutBtn" class="icon-btn small" type="button" data-i18n-aria-label="zoom.out" data-i18n-title="zoom.out" aria-label="Thu nhỏ" title="Thu nhỏ ( - )"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"/></svg></button>
     <span id="zoomLevel" class="zoom-level" aria-live="polite">100%</span>
-    <button id="zoomInBtn" class="icon-btn small" type="button" aria-label="Phóng to" title="Phóng to ( + )">＋</button>
-    <button id="zoomReset" class="icon-btn small" type="button" aria-label="Về khung nhìn mặc định" title="Về mặc định ( 0 hoặc nhấp đúp )">⟲</button>
+    <button id="zoomInBtn" class="icon-btn small" type="button" data-i18n-aria-label="zoom.in" data-i18n-title="zoom.in" aria-label="Phóng to" title="Phóng to ( + )"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button>
+    <button id="zoomReset" class="icon-btn small" type="button" data-i18n-aria-label="zoom.reset" data-i18n-title="zoom.reset" aria-label="Về mặc định" title="Về mặc định ( 0 hoặc nhấp đúp )"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4 4v5h5"/></svg></button>
   </div>
 
-  <button id="reportTab" class="panel-tab left ui" type="button" hidden aria-label="Mở báo cáo">📋</button>
-  <button id="sideTab" class="panel-tab right ui" type="button" hidden aria-label="Mở đội ngũ">👥</button>
+  <button id="reportTab" class="panel-tab left ui" type="button" hidden data-i18n-aria-label="a11y.openReport" aria-label="Mở báo cáo"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 12h6M9 16h6"/></svg></button>
+  <button id="sideTab" class="panel-tab right ui" type="button" hidden data-i18n-aria-label="a11y.openTeam" aria-label="Mở đội ngũ"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M16.5 14.1c2.6.4 4.5 2.8 4.5 5.9"/></svg></button>
 
   <!-- Khung giao nhiệm vụ (giữa) -->
-  <section id="taskbar" class="taskbar glass ui" aria-label="Giao nhiệm vụ">
+  <section id="taskbar" class="taskbar glass ui" data-i18n-aria-label="a11y.task" aria-label="Giao nhiệm vụ">
     <div class="status-line" id="statusTag" role="status"><span id="statusMessage">Đang kết nối backend…</span></div>
     <div class="task-row">
-      <textarea id="taskInput" rows="2" placeholder="Ví dụ: Phân tích cổ phiếu ngân hàng, tôi có 100 triệu, muốn đầu tư dài hạn 3 năm, chấp nhận rủi ro trung bình."></textarea>
+      <textarea id="taskInput" rows="2" data-i18n-placeholder="task.placeholder" placeholder="Ví dụ: Phân tích cổ phiếu ngân hàng, tôi có 100 triệu, muốn đầu tư dài hạn 3 năm, chấp nhận rủi ro trung bình."></textarea>
       <button id="missionButton" type="button" disabled>Giao việc</button>
     </div>
-    <small class="muted">Ctrl + Enter để gửi · Lăn chuột để phóng to, kéo để di chuyển, nhấp đúp để về mặc định · Báo cáo do AI tạo, chỉ mang tính tham khảo.</small>
+    <small class="muted" data-i18n="task.hint">Ctrl + Enter để gửi · Lăn chuột để phóng to, kéo để di chuyển, nhấp đúp để về mặc định · Báo cáo do AI tạo, chỉ mang tính tham khảo.</small>
   </section>
 
-  <!-- Màn chào -->
+  <!-- Màn chào + chọn ngôn ngữ -->
   <div id="intro" class="intro" hidden>
     <div class="intro-inner">
       <svg class="intro-mark" viewBox="0 0 120 120" aria-hidden="true">
@@ -168,10 +194,18 @@
         <circle cx="98" cy="30" r="5" class="mark-dot"/>
       </svg>
       <h1 class="intro-title"><span>Mini</span> <span>Capital</span></h1>
-      <p class="intro-tag">Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</p>
-      <p class="intro-hello">Xin chào, chào mừng Quý khách!</p>
+      <p class="intro-tag" data-i18n="intro.tag">Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</p>
+      <p class="intro-hello" data-i18n="intro.hello">Xin chào, chào mừng Quý khách!</p>
+      <div class="intro-lang">
+        <p class="intro-lang-label" data-i18n="intro.chooseLang">Chọn ngôn ngữ</p>
+        <div class="lang-picker" role="radiogroup" aria-label="Language / Ngôn ngữ / 言語">
+          <button type="button" class="lang-btn" role="radio" data-lang="vi" lang="vi">Tiếng Việt</button>
+          <button type="button" class="lang-btn" role="radio" data-lang="en" lang="en">English</button>
+          <button type="button" class="lang-btn" role="radio" data-lang="ja" lang="ja">日本語</button>
+        </div>
+        <button id="introEnter" class="intro-enter has-ico" type="button"><span data-i18n="intro.enter">Vào văn phòng</span><i data-icon="arrow"></i></button>
+      </div>
     </div>
-    <button id="introSkip" class="intro-skip" type="button">Bỏ qua ›</button>
   </div>
 
   <!-- Đơn cam kết -->
@@ -179,37 +213,37 @@
     <form id="pledgeForm" class="paper" novalidate>
       <header class="letterhead">
         <span class="logo">MC</span>
-        <div><strong>MINI CAPITAL</strong><small>Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small></div>
+        <div><strong>MINI CAPITAL</strong><small data-i18n="brand.tagline">Văn phòng AI nghiên cứu &amp; quản lý cổ phiếu</small></div>
         <span id="pledgeNo" class="doc-no"></span>
       </header>
-      <h2 id="pledgeTitle">ĐƠN CAM KẾT SỬ DỤNG DỊCH VỤ</h2>
-      <p>Tôi, người ký tên dưới đây, xác nhận đã đọc và hiểu rõ:</p>
+      <h2 id="pledgeTitle" data-i18n="pledge.title">ĐƠN CAM KẾT SỬ DỤNG DỊCH VỤ</h2>
+      <p data-i18n="pledge.lead">Tôi, người ký tên dưới đây, xác nhận đã đọc và hiểu rõ:</p>
       <ol class="terms">
-        <li>Toàn bộ nhân viên của Mini Capital là <strong>trợ lý AI</strong> (mô hình ngôn ngữ), không phải chuyên gia tài chính được cấp phép.</li>
-        <li>Báo cáo chỉ mang tính <strong>tham khảo</strong>, không phải lời khuyên đầu tư và không phải lời mời mua/bán chứng khoán.</li>
-        <li>AI <strong>không có dữ liệu thị trường thời gian thực</strong>; số liệu có thể lỗi thời, sai lệch hoặc bị AI suy diễn. Tôi sẽ tự kiểm chứng với nguồn chính thống trước khi quyết định.</li>
-        <li>Đầu tư cổ phiếu có rủi ro mất vốn. Tôi <strong>tự chịu trách nhiệm</strong> hoàn toàn với các quyết định đầu tư của mình.</li>
-        <li>Tôi không nhập thông tin nhạy cảm (mật khẩu, số tài khoản, giấy tờ tuỳ thân…). Nội dung yêu cầu sẽ được gửi tới nhà cung cấp AI đã chọn để xử lý.</li>
-        <li>Tên của tôi chỉ được lưu trên trình duyệt này để văn phòng xưng hô.</li>
+        <li data-i18n-html="pledge.t1"></li>
+        <li data-i18n-html="pledge.t2"></li>
+        <li data-i18n-html="pledge.t3"></li>
+        <li data-i18n-html="pledge.t4"></li>
+        <li data-i18n-html="pledge.t5"></li>
+        <li data-i18n-html="pledge.t6"></li>
       </ol>
 
       <div class="pledge-fields" id="pledgeFields">
-        <label for="clientName">Họ và tên khách hàng</label>
-        <input id="clientName" type="text" maxlength="60" autocomplete="name" placeholder="Nhập họ và tên của Quý khách" required>
-        <label class="check"><input type="checkbox" id="pledgeAgree"> Tôi đã đọc, hiểu và đồng ý với các điều trên.</label>
+        <label for="clientName" data-i18n="pledge.nameLabel">Họ và tên khách hàng</label>
+        <input id="clientName" type="text" maxlength="60" autocomplete="name" data-i18n-placeholder="pledge.namePlaceholder" placeholder="Nhập họ và tên của Quý khách" required>
+        <label class="check"><input type="checkbox" id="pledgeAgree"> <span data-i18n="pledge.agree">Tôi đã đọc, hiểu và đồng ý với các điều trên.</span></label>
         <p id="pledgeError" class="form-error" aria-live="assertive"></p>
       </div>
 
       <p class="date-line" id="pledgeDate"></p>
       <div class="signatures">
         <div class="sign-box">
-          <span class="sign-label">KHÁCH HÀNG<br><small>(ký, ghi rõ họ tên)</small></span>
+          <span class="sign-label"><span data-i18n="pledge.clientLabel">KHÁCH HÀNG</span><br><small data-i18n="pledge.clientSub">(ký, ghi rõ họ tên)</small></span>
           <span id="clientSignature" class="signature"></span>
           <span id="clientPrinted" class="printed"></span>
         </div>
         <div class="sign-box">
-          <span class="sign-label">ĐẠI DIỆN MINI CAPITAL<br><small>Giám đốc đầu tư (AI)</small></span>
-          <span id="officeSignature" class="signature written">Giám đốc AI</span>
+          <span class="sign-label"><span data-i18n="pledge.officeLabel">ĐẠI DIỆN MINI CAPITAL</span><br><small data-i18n="pledge.officeSub">Giám đốc đầu tư (AI)</small></span>
+          <span id="officeSignature" class="signature written" data-i18n="pledge.officeSign">Giám đốc AI</span>
           <svg id="stamp" class="stamp" viewBox="0 0 140 140" aria-hidden="true">
             <defs>
               <path id="stampCircle" d="M70,70 m-50,0 a50,50 0 1,1 100,0 a50,50 0 1,1 -100,0"/>
@@ -218,9 +252,9 @@
             <g filter="url(#ink)">
               <circle cx="70" cy="70" r="64" class="ring"/>
               <circle cx="70" cy="70" r="40" class="ring thin"/>
-              <text class="ring-text"><textPath href="#stampCircle" startOffset="0">MINI CAPITAL ✦ VĂN PHÒNG ĐẦU TƯ AI ✦</textPath></text>
+              <text class="ring-text"><textPath href="#stampCircle" startOffset="0" data-i18n="pledge.stampRing">MINI CAPITAL ✦ VĂN PHÒNG ĐẦU TƯ AI ✦</textPath></text>
               <text x="70" y="62" class="star">★</text>
-              <text x="70" y="82" class="center-text">ĐÃ DUYỆT</text>
+              <text x="70" y="82" class="center-text" data-i18n="pledge.stampCenter">ĐÃ DUYỆT</text>
             </g>
           </svg>
           <span class="printed">Mini Capital</span>
@@ -228,7 +262,7 @@
       </div>
 
       <div class="pledge-actions">
-        <button id="pledgeSubmit" type="submit">✍️ Ký tên &amp; đóng dấu</button>
+        <button id="pledgeSubmit" class="has-ico" type="submit"><i data-icon="pen"></i><span data-i18n="pledge.submit">Ký tên &amp; đóng dấu</span></button>
         <button id="pledgeClose" class="secondary" type="button" hidden>Đóng</button>
       </div>
     </form>

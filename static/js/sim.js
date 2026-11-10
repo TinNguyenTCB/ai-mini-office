@@ -3,9 +3,11 @@
 // Chạy theo bước thời gian cố định 60 Hz nên tốc độ không phụ thuộc tần số màn hình.
 
 import { ISO } from "./iso.js";
-import { chatPoints, localPoint, rot, runtime, seatPoint, sofaSeats, toWorld, usePoint } from "./furniture.js";
+import { CATALOG, chatPoints, localPoint, rot, runtime, seatPoint, sofaSeats, toWorld, usePoint } from "./furniture.js";
 import { findPath, nearestWalkable, reachable } from "./pathfinding.js";
-import { ACTIVITY_LINES, HANDOFF_LINES, NAMES, pick, pickConversation } from "./dialogue.js";
+import { project } from "./iso.js";
+import { activityLine, handoffLine, names, pickConversation } from "./dialogue.js";
+import { t } from "./i18n.js";
 
 export const TICK_HZ = 60;
 const sec = s => Math.round(s * TICK_HZ);
@@ -21,10 +23,13 @@ let tick = 0;
 let layout = [];
 let layoutVersion = 0;
 let printerUntil = 0;
+let cabinetUntil = 0;
 export const flags = { breaksPaused: false };
+// Hiệu ứng bay trong phòng (cục giấy ném vào thùng rác...). main.js vẽ chúng trên cùng.
+export const effects = [];
 
 export const staff = Object.fromEntries(ORDER.map((id, i) => [id, {
-  id, name: NAMES[id], x: FALLBACK[id].x, y: FALLBACK[id].y,
+  id, name: names()[id], x: FALLBACK[id].x, y: FALLBACK[id].y,
   facing: "S", path: [], plan: [], stepIndex: 0, stepState: null, planKind: "home",
   serverStatus: "idle", serverMessage: "", statusBubble: null, actionBubble: null,
   sitting: false, seatBlend: 0, lift: 0, moving: false, working: false, talking: false,
@@ -32,6 +37,9 @@ export const staff = Object.fromEntries(ORDER.map((id, i) => [id, {
   nextBreakAt: sec(14 + i * 7 + Math.random() * 8), animationSeed: Math.random() * 280,
 }]));
 const agents = Object.values(staff);
+
+// Đổi ngôn ngữ -> cập nhật bảng tên trên đầu nhân viên.
+export function renameStaff() { for (const a of agents) a.name = names()[a.id]; }
 
 // ---------------------------------------------------------------------------
 // Tiện ích
@@ -119,6 +127,7 @@ function nextStep(a) {
 
 function enterStep(a, s) {
   a.stepState = { start: tick };
+  a.holdStart = tick; // cho các cử chỉ có diễn biến theo thời gian (vo giấy, ném)
   a.actionBubble = s.bubble ? { text: typeof s.bubble === "function" ? s.bubble() : s.bubble, tone: s.tone || "ok" } : null;
   a.holding = s.holding ?? null;
   a.sitting = !!s.sit;
@@ -247,7 +256,7 @@ function chatTick(a, s) {
 function startChat(a, b, [pa, pb]) {
   const convo = { lines: pickConversation(a.id, b.id), index: -1, nextAt: 0 };
   const plan = (other, spot, me) => [
-    go(() => spot, { bubble: "Ra trò chuyện chút" }),
+    go(() => spot, { bubble: t("sim.goChat") }),
     { type: "chat", convo, me, other: other.id },
     home(),
   ];
@@ -269,26 +278,26 @@ function tryBreak(a) {
   a.nextBreakAt = tick + sec(28 + Math.random() * 35);
   if (flags.breaksPaused) return;
   if (agents.filter(o => o.planKind === "break").length >= 2) return;
-  const say = kind => pick(ACTIVITY_LINES[kind][a.id]);
+  const say = kind => activityLine(kind, a.id);
 
   const options = [];
   const drink = nearestItem(a, ["vending", "watercooler"]);
   if (drink) options.push(() => [
-    go(() => usePoint(drink), { bubble: "Đi lấy nước" }),
+    go(() => usePoint(drink), { bubble: t("sim.getWater") }),
     wait(1.5, { face: drink }),
     wait(4.5, { holding: "cup", face: "S", bubble: say("coffee"), tone: "speech", speak: true }),
     home({ holding: "cup" }),
   ]);
   const shelf = nearestItem(a, ["bookshelf"]);
   if (shelf) options.push(() => [
-    go(() => usePoint(shelf), { bubble: "Tìm tài liệu" }),
+    go(() => usePoint(shelf), { bubble: t("sim.findDocs") }),
     wait(2, { face: shelf }),
     wait(5, { holding: "book", face: "S", bubble: `📖 ${say("read")}` }),
     home({ holding: "book" }),
   ]);
   const windowSpot = nearestWalkable(WINDOW_SPOT.x, WINDOW_SPOT.y);
   if (windowSpot && reachable(a, windowSpot)) options.push(() => [
-    go(() => windowSpot, { bubble: "Ra cửa sổ" }),
+    go(() => windowSpot, { bubble: t("sim.toWindow") }),
     wait(5, { face: WINDOW_LOOK, bubble: say("window"), tone: "speech", speak: true }),
     home(),
   ]);
@@ -303,7 +312,7 @@ function tryBreak(a) {
       const front = { x: seat.x + fx * 32, y: seat.y + fy * 32 };
       const claim = x => { x.sofaSeat = `${sofa.id}:${k}`; };
       options.push(() => [
-        go(() => nearestWalkable(front.x, front.y), { bubble: "Ngồi nghỉ chút", onStart: claim }),
+        go(() => nearestWalkable(front.x, front.y), { bubble: t("sim.sitRest"), onStart: claim }),
         slide(() => seat, { onStart: claim }),
         wait(7, { sit: true, bubble: `😌 ${say("sofa")}`, onStart: x => { claim(x); x.facing = facingFor(fx, fy); } }),
         slide(() => nearestWalkable(front.x, front.y)),
@@ -336,16 +345,16 @@ function workSteps(a, status) {
   if (a.id === "manager" && status === "thinking") {
     const board = nearestItem(a, ["whiteboard"]);
     if (board) return [
-      go(() => usePoint(board), { bubble: "Lập kế hoạch đầu tư", fast: true, onStart: () => { runtime.boardInk = 0; } }),
-      wait(4.5, { face: board, bubble: "Phân công nhiệm vụ", ink: true }),
+      go(() => usePoint(board), { bubble: t("sim.planInvest"), fast: true, onStart: () => { runtime.boardInk = 0; } }),
+      wait(4.5, { face: board, bubble: t("sim.assign"), ink: true }),
       home({ fast: true }),
     ];
   }
   if (a.id === "analyst" && status === "working") {
     const shelf = nearestItem(a, ["bookshelf"]);
     if (shelf) return [
-      go(() => usePoint(shelf), { bubble: "Tìm báo cáo tài chính", fast: true }),
-      wait(3, { face: shelf, bubble: "Đọc báo cáo thường niên" }),
+      go(() => usePoint(shelf), { bubble: t("sim.findReports"), fast: true }),
+      wait(3, { face: shelf, bubble: t("sim.readAnnual") }),
       home({ fast: true, holding: "book" }),
     ];
   }
@@ -362,7 +371,7 @@ export function applyStatus(id, status, message, { animate = true } = {}) {
     a.statusBubble = { text: a.serverMessage, tone: "work" };
     if (animate && prev !== status) setPlan(a, "work", workSteps(a, status));
   } else if (status === "done") {
-    a.statusBubble = { text: "Xong phần việc ✔", tone: "ok", until: tick + sec(4) };
+    a.statusBubble = { text: t("sim.done"), tone: "ok", until: tick + sec(4) };
   } else if (status === "error") {
     a.statusBubble = { text: a.serverMessage, tone: "error", until: tick + sec(8) };
   } else {
@@ -375,10 +384,10 @@ export function applyActivity(id, kind, message) {
   const a = staff[id];
   if (!a || !BUSY.has(a.serverStatus)) return;
   if (kind === "thinking") {
-    a.statusBubble = { text: "💭 Đang suy nghĩ…", tone: "work" };
+    a.statusBubble = { text: t("sim.thinking"), tone: "work" };
   } else {
     a.typingUntil = tick + sec(4);
-    a.statusBubble = { text: `⌨️ ${message || "Đang viết…"}`, tone: "work", until: tick + sec(5) };
+    a.statusBubble = { text: `⌨️ ${message || t("sim.writing")}`, tone: "work", until: tick + sec(5) };
   }
 }
 
@@ -389,15 +398,15 @@ export function applyHandoff(fromId, toId) {
   if (toId === "manager") {
     const printer = nearestItem(a, ["printer"]);
     if (printer) steps.push(
-      go(() => usePoint(printer), { bubble: "In báo cáo", fast: true }),
-      wait(2.5, { face: printer, bubble: "Đang in…", onStart: () => { printerUntil = tick + sec(2.5); } }),
+      go(() => usePoint(printer), { bubble: t("sim.print"), fast: true }),
+      wait(2.5, { face: printer, bubble: t("sim.printing"), onStart: () => { printerUntil = tick + sec(2.5); } }),
     );
   }
   steps.push(
-    go(() => besideDesk(toId), { bubble: `Bàn giao cho ${b.name}`, fast: true, holding: "paper" }),
+    go(() => besideDesk(toId), { bubble: t("sim.handoffTo", { name: b.name }), fast: true, holding: "paper" }),
     wait(3, {
       face: () => staff[toId], holding: "paper", tone: "speech", speak: true,
-      bubble: HANDOFF_LINES[`${fromId}>${toId}`] || "Phần của mình xong rồi nhé!",
+      bubble: handoffLine(`${fromId}>${toId}`) || t("sim.handoffDefault"),
     }),
     home(),
   );
@@ -423,6 +432,82 @@ export function runScript(id, actions) {
   setPlan(a, "script", steps);
 }
 
+// ---------------------------------------------------------------------------
+// Tủ hồ sơ & thùng rác: Giám đốc cất báo cáo / vo giấy ném vào thùng rác.
+// ---------------------------------------------------------------------------
+const nearestOfType = (a, type) => layout.filter(it => it.type === type)
+  .sort((p, q) => dist(a, p) - dist(a, q))[0] || null;
+
+// Cất báo cáo: cầm tập giấy ra tủ, kéo ngăn, bỏ vào rồi về chỗ. onFiled chạy lúc đóng ngăn.
+export function fileReportScene(onFiled) {
+  const a = staff.manager;
+  const cab = nearestOfType(a, "cabinet");
+  const spot = cab && usePoint(cab) && nearestWalkable(usePoint(cab).x, usePoint(cab).y);
+  if (!cab || !spot || !reachable(a, spot)) { onFiled?.(); return false; }
+  setPlan(a, "script", [
+    go(() => spot, { bubble: t("sim.toCabinet"), fast: true, holding: "paper" }),
+    wait(0.5, { face: cab, holding: "paper", onStart: () => { cabinetUntil = tick + sec(2.2); } }),
+    wait(1.4, { face: cab, holding: "paper", bubble: t("sim.filing"), tone: "speech", speak: true }),
+    { type: "do", fn: () => onFiled?.() },
+    wait(0.5, { face: cab }),
+    home(),
+  ]);
+  return true;
+}
+
+// Điểm ném: đứng cách thùng rác ~50 đơn vị, ưu tiên phía chỗ ngồi của Giám đốc.
+function throwSpot(a, bin) {
+  const from = homeTarget(a);
+  if (dist(from, bin) <= 95 && reachable(a, from)) return from; // thùng ở gần: ném luôn từ chỗ ngồi
+  const dx = from.x - bin.x, dy = from.y - bin.y, d = Math.hypot(dx, dy) || 1;
+  for (const r of [50, 42, 60, 34]) {
+    for (const turn of [0, 0.5, -0.5, 1, -1, 1.6, -1.6]) {
+      const ang = Math.atan2(dy, dx) + turn;
+      const p = nearestWalkable(bin.x + Math.cos(ang) * r, bin.y + Math.sin(ang) * r);
+      if (p && Math.abs(dist(p, bin) - r) < 12 && reachable(a, p)) return p;
+    }
+  }
+  return null;
+}
+
+// Xoá báo cáo: cầm tờ báo cáo, vo tròn trước mặt, quay sang ném vào thùng rác.
+export function trashReportScene() {
+  const a = staff.manager;
+  const bin = nearestOfType(a, "trash");
+  const spot = bin ? throwSpot(a, bin) : null;
+  const steps = [];
+  if (spot) steps.push(go(() => spot, { fast: true, holding: "paper" }));
+  steps.push(
+    wait(1.3, { face: "S", holding: "paper", bubble: t("sim.trashSay"), tone: "speech", speak: true }),
+    wait(1.4, { face: "S", holding: "crumple", bubble: t("sim.crumple"), tone: "speech" }),
+  );
+  if (spot) {
+    const flight = sec(0.65);
+    steps.push(
+      wait(0.35, { face: bin, holding: "ball" }),
+      {
+        type: "do", fn: me => {
+          me.holdStart = tick;
+          const dir = project(bin.x, bin.y).x >= project(me.x, me.y).x ? 1 : -1;
+          const h = project(me.x, me.y);
+          effects.push({
+            kind: "paperBall", start: tick, ticks: flight,
+            from: { x: h.x + dir * 9, y: h.y - 58 },
+            to: (() => { const q = project(bin.x, bin.y, CATALOG.trash.h - 6); return { x: q.x, y: q.y }; })(),
+            peak: 34, onLand: () => { runtime.trashCount = Math.min(5, runtime.trashCount + 1); },
+          });
+        },
+      },
+      wait(0.65, { face: bin, holding: "throw" }),
+      wait(1.6, { face: bin, bubble: t("sim.score"), tone: "speech", speak: true }),
+    );
+  } else {
+    steps.push(wait(1.2, { face: "S", holding: "ball", bubble: t("sim.pocket"), tone: "speech", speak: true }));
+  }
+  steps.push(home());
+  setPlan(a, "script", steps);
+}
+
 // Mọi người cùng quay về một điểm (vd. nhìn Giám đốc phát biểu).
 export function lookAt(point, ids = ORDER) {
   for (const id of ids) {
@@ -435,6 +520,7 @@ export function lookAt(point, ids = ORDER) {
 // Vòng cập nhật + bố trí
 // ---------------------------------------------------------------------------
 runtime.printerActive = () => tick < printerUntil;
+runtime.cabinetOpen = () => tick < cabinetUntil;
 runtime.screenState = item => {
   const owner = item.assignedTo && staff[item.assignedTo];
   if (!owner) return "off";
@@ -467,6 +553,10 @@ export function seatEveryone() {
 export function update() {
   tick++;
   runtime.tick = tick;
+  for (let i = effects.length - 1; i >= 0; i--) {
+    const e = effects[i];
+    if (tick - e.start >= e.ticks) { e.onLand?.(); effects.splice(i, 1); }
+  }
   for (const a of agents) {
     a.moving = false;
     if (a.planKind === "home" && tick >= a.nextBreakAt && freeForBreak(a)) tryBreak(a);

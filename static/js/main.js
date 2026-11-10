@@ -2,20 +2,25 @@
 
 import { ISO, bindContext, floorRect, isoSort, line, poly, project, unproject } from "./iso.js";
 import {
-  CATALOG, DEFAULT_LAYOUT, drawItem, fitsInRoom, footprint, overlapsAny, pickItem, rot, sceneDrawables, seatPoint,
+  CATALOG, DEFAULT_LAYOUT, drawItem, drawPaperBall, fitsInRoom, footprint, overlapsAny, pickItem, rot, runtime,
+  sceneDrawables, seatPoint, usePoint,
 } from "./furniture.js";
-import { rebuild, reachable } from "./pathfinding.js";
+import { nearestWalkable, rebuild, reachable } from "./pathfinding.js";
 import {
-  ORDER, TICK_HZ, agentDrawables, applyActivity, applyHandoff, applyStatus, bubbleOf, flags, getTick,
-  lookAt, runScript, seatEveryone, setLayout, staff, update,
+  ORDER, TICK_HZ, agentDrawables, applyActivity, applyHandoff, applyStatus, bubbleOf, effects, fileReportScene, flags,
+  getTick, lookAt, renameStaff, runScript, seatEveryone, setLayout, staff, trashReportScene, update,
 } from "./sim.js";
 import { drawAgent, drawOverlay, roleColor } from "./characters.js";
-import { DUTIES, TITLES } from "./dialogue.js";
+import { duties, titles } from "./dialogue.js";
+import { applyI18n, clientName, fmtDate, fmtDateTime, fmtTime, getLang, LANGS, setLang, t } from "./i18n.js";
 import { renderMarkdown } from "./markdown.js";
+import { applyIcons, icon, setLabel } from "./icons.js";
+import { drawSkyline } from "./skyline.js";
 import { delay, loadClient, openPledge, playIntro } from "./onboarding.js";
 import { cancelDemo, isDemoRunning, runDemo } from "./demo.js";
 
 const $ = id => document.getElementById(id);
+applyIcons();
 const canvas = $("officeCanvas");
 const ctx = canvas.getContext("2d");
 bindContext(ctx);
@@ -47,9 +52,48 @@ function loadLayout() {
       if (it.type !== "desk" || !it.assignedTo) continue;
       if (seen.has(it.assignedTo)) it.assignedTo = ""; else seen.add(it.assignedTo);
     }
-    if (items.length) return items;
+    if (items.length) return addFixtures(items);
   }
   return defaultLayout();
+}
+
+// Bản cũ chưa có tủ hồ sơ / thùng rác: tự kê thêm một lần cạnh bàn Giám đốc (người dùng xoá sau đó thì thôi).
+const FIXTURE_KEY = "ai-office-fixtures-v1";
+function addFixtures(items) {
+  if (store.get(FIXTURE_KEY, false)) return items;
+  store.set(FIXTURE_KEY, true);
+  const desk = items.find(it => it.type === "desk" && it.assignedTo === "manager");
+  const seat = desk ? seatPoint(desk) : { x: 455, y: 83 };
+  const seats = items.filter(it => it.type === "desk").map(seatPoint);
+  const fine = (item, list) => {
+    if (!fitsInRoom(item) || overlapsAny(item, list)) return false;
+    const b = footprint(item); // chừa khoảng trống quanh ghế Giám đốc
+    if (Math.hypot(Math.max(b.x0 - seat.x, 0, seat.x - b.x1), Math.max(b.y0 - seat.y, 0, seat.y - b.y1)) < 24) return false;
+    rebuild([...list, item]);
+    if (!seats.every(p => reachable(seat, p))) return false;
+    if (item.type !== "cabinet") return true;
+    const use = usePoint(item), w = use && nearestWalkable(use.x, use.y);
+    return !!w && Math.hypot(w.x - use.x, w.y - use.y) < 10 && reachable(seat, w);
+  };
+  let added = false;
+  for (const type of ["cabinet", "trash"]) {
+    if (items.some(it => it.type === type)) continue;
+    const preset = DEFAULT_LAYOUT.find(it => it.type === type);
+    const cands = [{ x: preset.x, y: preset.y }];
+    for (let x = 40; x <= 520; x += 5) {
+      for (let y = 40; y <= 520; y += 5) {
+        const d = Math.hypot(x - seat.x, y - seat.y);
+        if (d > 25 && d < 170) cands.push({ x, y, d });
+      }
+    }
+    cands.sort((a, b) => (a.d ?? 0) - (b.d ?? 0));
+    for (const c of cands.slice(0, 400)) {
+      const item = { id: newId(), type, x: c.x, y: c.y, rotation: 0, assignedTo: "" };
+      if (fine(item, items)) { items.push(item); added = true; break; }
+    }
+  }
+  if (added) store.set(LAYOUT_KEY, items.map(({ _cache, ...rest }) => rest));
+  return items;
 }
 const defaultLayout = () => DEFAULT_LAYOUT.map(it => ({ id: newId(), assignedTo: "", rotation: 0, ...it }));
 
@@ -59,7 +103,7 @@ function commitLayout({ persist = true } = {}) {
   rebuild(layout);
   setLayout(layout);
   if (persist && !store.set(LAYOUT_KEY, layout.map(({ _cache, ...rest }) => rest))) {
-    setHint("Không lưu được bố trí trên trình duyệt này (localStorage bị chặn).");
+    setHint(t("furn.storageFail"));
   }
   renderEditor();
 }
@@ -69,6 +113,7 @@ function commitLayout({ persist = true } = {}) {
 // ===========================================================================
 const ROOM_BOX = { x0: 48, y0: -10, x1: 572, y1: 592 }; // vùng logic cần hiển thị (gồm cả bảng tên trên đầu)
 const view = { scale: 1, ox: 0, oy: 0, dpr: 1, w: 0, h: 0 };
+const reportView = { expanded: false };
 
 function visible(el) { return el && !el.hidden && el.getClientRects().length > 0; }
 
@@ -83,7 +128,7 @@ function layoutView() {
   const task = $("taskbar");
   if (visible(task)) bottom = task.getBoundingClientRect().top - 8;
   if (W > 1000) {
-    if (visible($("reportPanel"))) left = $("reportPanel").getBoundingClientRect().right + 8;
+    if (visible($("reportPanel")) && !reportView.expanded) left = $("reportPanel").getBoundingClientRect().right + 8;
     if (visible($("sidePanel"))) right = $("sidePanel").getBoundingClientRect().left - 8;
   }
   const bw = ROOM_BOX.x1 - ROOM_BOX.x0, bh = ROOM_BOX.y1 - ROOM_BOX.y0;
@@ -303,7 +348,7 @@ function drawWalls(tick) {
   stepMarket(tick);
   W(390, 528, 52, 108, "#28392c", "#6f8a5a");
   W(393, 525, 63, 105, "#08110c");
-  wallText("back", { x: 396, y: 29, z: 98 }, "THỊ TRƯỜNG · minh hoạ", "bold 6.5px \"Segoe UI\", sans-serif", "#9fd6a8");
+  wallText("back", { x: 396, y: 29, z: 98 }, t("wall.market"), "bold 6.5px \"Segoe UI\", sans-serif", "#9fd6a8");
   const min = Math.min(...market.series), max = Math.max(...market.series);
   const zOf = v => 68 + ((v - min) / Math.max(1, max - min)) * 22;
   market.series.forEach((v, i) => {
@@ -333,7 +378,7 @@ function drawWalls(tick) {
   P(354, 374, 72, 94, "#2f8a55");
   wallText("left", { x: 31, y: 372, z: 79 }, "MC", "800 10px \"Segoe UI\", sans-serif", "#04130b");
   wallText("left", { x: 31, y: 346, z: 84 }, "MINI CAPITAL", "800 11px \"Segoe UI\", sans-serif", "#e9f6ec");
-  wallText("left", { x: 31, y: 346, z: 73 }, "Nghiên cứu & quản lý cổ phiếu", "600 5.6px \"Segoe UI\", sans-serif", "#9fd6a8");
+  wallText("left", { x: 31, y: 346, z: 73 }, t("wall.tagline"), "600 5.6px \"Segoe UI\", sans-serif", "#9fd6a8");
 
   // Đồng hồ treo tường – chạy theo giờ thật
   const cx = 180, cz = 92, r = 11, Y = 29;
@@ -366,19 +411,26 @@ const selectedItem = () => layout.find(it => it.id === editor.selectedId) || nul
 const validAt = (item, at) => fitsInRoom(item, at) && !overlapsAny(item, layout, at);
 function setHint(text) { $("furnitureHint").textContent = text; }
 
+// Bấm vào tủ hồ sơ (khi không sắp xếp nội thất) để mở tủ.
+let clickStart = null;
+function itemAt(event) {
+  const s = canvasPoint(event);
+  return pickItem(drawOrder, s.x, s.y, unproject(s.x, s.y));
+}
 canvas.addEventListener("pointerdown", event => {
+  clickStart = !editor.open && event.button === 0 ? { x: event.clientX, y: event.clientY } : null;
   if (startPan(event)) return;
   if (!editor.open || event.button !== 0) return;
   const s = canvasPoint(event);
   const world = unproject(s.x, s.y);
   if (editor.placing) {
     Object.assign(ghost, { type: editor.placing, rotation: editor.placingRotation, x: snap(world.x), y: snap(world.y) });
-    if (!validAt(ghost, ghost)) { setHint("Không đặt được ở đây: chồng lên đồ khác hoặc ra ngoài phòng."); return; }
+    if (!validAt(ghost, ghost)) { setHint(t("furn.cantPlace")); return; }
     const item = { id: newId(), type: ghost.type, x: ghost.x, y: ghost.y, rotation: ghost.rotation, assignedTo: "" };
     layout.push(item);
     editor.selectedId = item.id;
     if (!event.shiftKey) editor.placing = null;
-    setHint(event.shiftKey ? "Giữ Shift để đặt tiếp món tương tự." : `Đã đặt ${CATALOG[item.type].label.toLowerCase()}. Kéo để di chuyển, R để xoay.`);
+    setHint(event.shiftKey ? t("furn.shiftHint") : t("furn.placed", { label: t(`furn.item.${item.type}`) }));
     commitLayout();
     return;
   }
@@ -394,6 +446,7 @@ canvas.addEventListener("pointerdown", event => {
 
 canvas.addEventListener("pointermove", event => {
   if (movePan(event)) return;
+  if (!editor.open) canvas.classList.toggle("over-cabinet", itemAt(event)?.type === "cabinet");
   const world = unproject(...Object.values(canvasPoint(event)));
   editor.hover = world;
   if (!editor.drag) return;
@@ -414,7 +467,13 @@ function endDrag() {
   canvas.classList.remove("is-dragging");
   if (moved) commitLayout();
 }
-canvas.addEventListener("pointerup", () => { endPan(); endDrag(); });
+canvas.addEventListener("pointerup", event => {
+  endPan();
+  endDrag();
+  const c = clickStart;
+  clickStart = null;
+  if (c && Math.hypot(event.clientX - c.x, event.clientY - c.y) < 5 && itemAt(event)?.type === "cabinet") openCabinet();
+});
 canvas.addEventListener("pointercancel", () => { endPan(); endDrag(); });
 $("zoomInBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1.35));
 $("zoomOutBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1 / 1.35));
@@ -433,7 +492,7 @@ function rotateSelection() {
   const item = selectedItem();
   if (!item) return;
   const turned = { ...item, rotation: (rot(item) + 1) % 4 };
-  if (!validAt(turned, turned)) { setHint("Không xoay được: sẽ chạm đồ khác hoặc tường."); return; }
+  if (!validAt(turned, turned)) { setHint(t("furn.cantRotate")); return; }
   item.rotation = turned.rotation;
   commitLayout();
 }
@@ -443,8 +502,12 @@ function deleteSelection() {
   if (!item) return;
   layout = layout.filter(it => it !== item);
   editor.selectedId = null;
-  setHint(`Đã xoá ${CATALOG[item.type].label.toLowerCase()}.`);
+  setHint(t("furn.deleted", { label: t(`furn.item.${item.type}`) }));
   commitLayout();
+}
+
+function furnToggleLabel() {
+  setLabel($("furnitureToggle"), editor.open ? "check" : "move", editor.open ? t("furn.done") : t("furn.enable"));
 }
 
 function setEditing(on) {
@@ -452,7 +515,7 @@ function setEditing(on) {
   if (!on) { editor.placing = null; editor.selectedId = null; }
   $("furnitureEditor").hidden = !on;
   $("furnitureToggle").setAttribute("aria-expanded", String(on));
-  $("furnitureToggle").textContent = on ? "✓ Xong sắp xếp" : "Bật chế độ sắp xếp";
+  furnToggleLabel();
   canvas.classList.toggle("is-editing", on);
   renderEditor();
   updateZoomUi();
@@ -465,16 +528,16 @@ $("furnitureReset").addEventListener("click", () => {
   const btn = $("furnitureReset");
   if (performance.now() > editor.resetArmedUntil) {
     editor.resetArmedUntil = performance.now() + 3000;
-    btn.textContent = "Bấm lần nữa để xác nhận";
-    setTimeout(() => { btn.textContent = "↺ Mặc định"; }, 3000);
+    setLabel(btn, "alert", t("furn.confirm"));
+    setTimeout(() => { setLabel(btn, "reset", t("furn.reset")); }, 3000);
     return;
   }
   editor.resetArmedUntil = 0;
-  btn.textContent = "↺ Mặc định";
+  setLabel(btn, "reset", t("furn.reset"));
   layout = defaultLayout();
   editor.selectedId = null;
   editor.placing = null;
-  setHint("Đã khôi phục bố trí mặc định.");
+  setHint(t("furn.restored"));
   commitLayout();
 });
 $("furnitureAssignment").addEventListener("change", event => {
@@ -483,22 +546,30 @@ $("furnitureAssignment").addEventListener("change", event => {
   const who = event.target.value;
   for (const other of layout) if (other.type === "desk" && other.assignedTo === who && who) other.assignedTo = "";
   item.assignedTo = who;
-  setHint(who ? `${TITLES[who]} sẽ ngồi ở bàn này.` : "Bàn đã trống.");
+  setHint(who ? t("furn.assigned", { title: titles()[who] }) : t("furn.unassigned"));
   commitLayout();
 });
-for (const id of ORDER) $("furnitureAssignment").append(new Option(TITLES[id], id));
+function renderAssignmentOptions() {
+  const select = $("furnitureAssignment");
+  const value = select.value;
+  select.replaceChildren(new Option(t("furn.emptyDesk"), ""), ...ORDER.map(id => new Option(titles()[id], id)));
+  select.value = value;
+}
+renderAssignmentOptions();
 
 function layoutWarnings() {
   const warnings = [];
   for (const id of ORDER) {
     const desk = layout.find(it => it.type === "desk" && it.assignedTo === id);
-    if (!desk) warnings.push(`${TITLES[id]} chưa có bàn – sẽ đứng chờ ở khu trống.`);
-    else if (!reachable(staff[id], seatPoint(desk))) warnings.push(`Ghế của ${TITLES[id]} đang bị chặn lối đi.`);
+    if (!desk) warnings.push(t("furn.warn.noDesk", { title: titles()[id] }));
+    else if (!reachable(staff[id], seatPoint(desk))) warnings.push(t("furn.warn.blocked", { title: titles()[id] }));
   }
   const has = t => layout.some(it => it.type === t);
-  if (!has("whiteboard")) warnings.push("Không có bảng trắng: Giám đốc sẽ lập kế hoạch tại bàn.");
-  if (!has("bookshelf")) warnings.push("Không có kệ sách: Chuyên viên phân tích sẽ tra cứu tại bàn.");
-  if (!has("printer")) warnings.push("Không có máy in: Quản trị rủi ro sẽ nộp báo cáo trực tiếp.");
+  if (!has("whiteboard")) warnings.push(t("furn.warn.noWhiteboard"));
+  if (!has("bookshelf")) warnings.push(t("furn.warn.noBookshelf"));
+  if (!has("printer")) warnings.push(t("furn.warn.noPrinter"));
+  if (!has("cabinet")) warnings.push(t("furn.warn.noCabinet"));
+  if (!has("trash")) warnings.push(t("furn.warn.noTrash"));
   return warnings;
 }
 
@@ -507,22 +578,22 @@ function renderEditor() {
     const b = document.createElement("button");
     b.type = "button";
     b.className = `furniture-card${editor.placing === type ? " active" : ""}`;
-    b.textContent = `${def.icon} ${def.label}`;
+    setLabel(b, `f-${type}`, t(`furn.item.${type}`));
     b.addEventListener("click", () => {
       editor.placing = editor.placing === type ? null : type;
       editor.selectedId = null;
-      setHint(editor.placing ? `Đang đặt ${def.label.toLowerCase()}: bấm lên sàn (R để xoay, Shift để đặt nhiều).` : "Đã huỷ đặt đồ.");
+      setHint(editor.placing ? t("furn.placing", { label: t(`furn.item.${type}`) }) : t("furn.cancelPlace"));
       renderEditor();
     });
     return b;
   }));
-  $("furnitureCount").textContent = `(${layout.length} món)`;
+  $("furnitureCount").textContent = t("furn.count", { n: layout.length });
   const item = selectedItem();
   $("furnitureRotate").disabled = !item && !editor.placing;
   $("furnitureDelete").disabled = !item;
-  $("furnitureSelection").textContent = item
-    ? `${CATALOG[item.type].icon} ${CATALOG[item.type].label} · hướng ${rot(item) * 90}°`
-    : editor.placing ? `Sẵn sàng đặt: ${CATALOG[editor.placing].label} · hướng ${editor.placingRotation * 90}°` : "Chưa chọn món nào.";
+  setLabel($("furnitureSelection"), item ? `f-${item.type}` : null, item
+    ? t("furn.selected", { label: t(`furn.item.${item.type}`), deg: rot(item) * 90 })
+    : editor.placing ? t("furn.ready", { label: t(`furn.item.${editor.placing}`), deg: editor.placingRotation * 90 }) : t("furn.none"));
   $("furnitureAssignmentWrap").hidden = !item || item.type !== "desk";
   if (item && item.type === "desk") $("furnitureAssignment").value = item.assignedTo || "";
   canvas.classList.toggle("is-placing", !!editor.placing);
@@ -548,6 +619,7 @@ function render() {
   ctx.setTransform(view.dpr * s, 0, 0, view.dpr * s,
     view.dpr * (view.cx - camera.focus.x * s), view.dpr * (view.cy - camera.focus.y * s));
 
+  drawSkyline(ctx, tick); // phong cảnh thành phố bên ngoài (đổi theo ngôn ngữ)
   drawFloor();
   drawWalls(tick);
 
@@ -564,6 +636,14 @@ function render() {
     ...agentDrawables(a => drawAgent(a, project(a.x, a.y), tick)),
   ]);
   for (const d of drawOrder) d.draw();
+
+  // Cục giấy đang bay theo đường parabol vào thùng rác.
+  for (const e of effects) {
+    const k = Math.min(1, (tick - e.start) / e.ticks);
+    const x = e.from.x + (e.to.x - e.from.x) * k;
+    const y = e.from.y + (e.to.y - e.from.y) * k - e.peak * 4 * k * (1 - k);
+    drawPaperBall(ctx, x, y, 4.4 - k * 1.4, tick * 0.35);
+  }
 
   if (editor.open) drawEditorOverlay();
 
@@ -588,7 +668,7 @@ function drawEditorOverlay() {
     const seat = seatPoint(desk);
     if (owner && Math.hypot(owner.x - seat.x, owner.y - seat.y) < 20) continue;
     const p = project(desk.x, desk.y, 62);
-    const label = owner ? owner.name : "Bàn trống";
+    const label = owner ? owner.name : t("furn.emptyLabel");
     ctx.font = "600 9px \"Segoe UI\", system-ui, sans-serif";
     ctx.textAlign = "center";
     const w = ctx.measureText(label).width + 10;
@@ -634,22 +714,28 @@ function applyPanels() {
   store.set(UI_KEY, ui);
   layoutView();
 }
-document.querySelectorAll("[data-collapse]").forEach(btn => btn.addEventListener("click", () => { ui[btn.dataset.collapse] = false; applyPanels(); }));
+document.querySelectorAll("[data-collapse]").forEach(btn => btn.addEventListener("click", () => {
+  if (btn.dataset.collapse === "report") setExpanded(false);
+  ui[btn.dataset.collapse] = false;
+  applyPanels();
+}));
 $("reportTab").addEventListener("click", () => { ui.report = true; applyPanels(); });
 $("sideTab").addEventListener("click", () => { ui.side = true; applyPanels(); });
-$("showReport").addEventListener("change", e => { ui.report = e.target.checked; applyPanels(); });
+$("showReport").addEventListener("change", e => { ui.report = e.target.checked; if (!ui.report) setExpanded(false); applyPanels(); });
 $("showSide").addEventListener("change", e => { ui.side = e.target.checked; applyPanels(); });
 
 function setDrawer(open) {
   $("drawer").hidden = !open;
   $("menuButton").setAttribute("aria-expanded", String(open));
-  $("menuButton").textContent = open ? "✕" : "☰";
+  $("menuButton").innerHTML = icon(open ? "close" : "menu");
   if (!open && editor.open) setEditing(false);
 }
 $("menuButton").addEventListener("click", () => setDrawer($("drawer").hidden));
 $("drawerClose").addEventListener("click", () => setDrawer(false));
 
 document.addEventListener("keydown", event => {
+  if (event.key === "Escape" && !$("cabinet").hidden) { closeCabinet(); return; }
+  if (event.key === "Escape" && reportView.expanded) { setExpanded(false); return; }
   const tag = document.activeElement?.tagName;
   if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
   if (!$("pledge").hidden) return;
@@ -662,15 +748,14 @@ document.addEventListener("keydown", event => {
 });
 
 let toastTimer = null;
-function toast(text, ms = 3500) {
+function toast(text, ms = 3500, iconName = null) {
   const el = $("toast");
-  el.textContent = text;
+  setLabel(el, iconName, text);
   el.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.hidden = true; }, ms);
 }
 
-const STATUS_LABEL = { idle: "Rảnh", thinking: "Lập kế hoạch", working: "Đang làm", reviewing: "Viết báo cáo", done: "Xong", error: "Lỗi" };
 
 function renderTeam() {
   $("teamList").replaceChildren(...ORDER.map(id => {
@@ -679,9 +764,9 @@ function renderTeam() {
     li.className = `team-row status-${a.serverStatus}`;
     li.innerHTML = `<span class="team-dot"></span><div class="team-info"><strong></strong><small></small></div><span class="pill"></span>`;
     li.querySelector(".team-dot").style.background = roleColor(id);
-    li.querySelector("strong").textContent = TITLES[id];
-    li.querySelector("small").textContent = a.serverStatus !== "idle" && a.serverMessage ? a.serverMessage : DUTIES[id];
-    li.querySelector(".pill").textContent = STATUS_LABEL[a.serverStatus] || a.serverStatus;
+    li.querySelector("strong").textContent = titles()[id];
+    li.querySelector("small").textContent = a.serverStatus !== "idle" && a.serverMessage ? a.serverMessage : duties()[id];
+    li.querySelector(".pill").textContent = t(`team.status.${a.serverStatus}`);
     return li;
   }));
 }
@@ -692,42 +777,198 @@ function log(text, tone = "") {
   const li = document.createElement("li");
   if (tone) li.className = tone;
   const time = document.createElement("time");
-  time.textContent = new Date().toLocaleTimeString("vi-VN", { hour12: false });
+  time.textContent = fmtTime();
   li.append(time, document.createTextNode(text));
   list.prepend(li);
   while (list.children.length > 80) list.lastChild.remove();
 }
 
+// ===========================================================================
+// Báo cáo: xem, phóng to, lưu vào tủ hồ sơ, xoá (Giám đốc vo giấy ném vào thùng rác)
+// ===========================================================================
 const REPORT_KEY = "ai-office-last-report";
-function showReport(text, meta = null, { error = false } = {}) {
+const ARCHIVE_KEY = "ai-office-archive";
+const ARCHIVE_MAX = 50;
+const reportId = () => `r-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+const report = { id: null, text: "", meta: null }; // báo cáo đang hiển thị (chỉ báo cáo hợp lệ mới có id)
+
+let archive = store.get(ARCHIVE_KEY, []);
+if (!Array.isArray(archive)) archive = [];
+archive = archive.filter(e => e && typeof e.text === "string" && e.id);
+runtime.archiveCount = archive.length;
+const archived = id => archive.find(e => e.id === id) || null;
+
+function showReport(text, meta = null, { error = false, id = null, persist = false } = {}) {
   const body = $("reportBody");
   body.classList.toggle("error", error);
   if (!text) {
-    body.innerHTML = '<p class="placeholder">Báo cáo sẽ xuất hiện ở đây sau khi Giám đốc đầu tư thẩm định và ký duyệt.</p>';
+    body.innerHTML = `<p class="placeholder" data-i18n="report.placeholder">${t("report.placeholder")}</p>`;
   } else if (error) {
     body.textContent = text;
   } else {
     body.innerHTML = renderMarkdown(text);
   }
+  body.scrollTop = 0;
   body.dataset.raw = error ? "" : text || "";
+  Object.assign(report, text && !error ? { id: id || reportId(), text, meta } : { id: null, text: "", meta: null });
+  if (persist && report.id) store.set(REPORT_KEY, { id: report.id, text, meta });
   $("copyResult").disabled = !body.dataset.raw;
   $("reportMeta").hidden = !meta;
   if (meta) $("reportMeta").textContent = meta;
   if (!ui.report && text) { ui.report = true; applyPanels(); }
+  renderReportActions();
 }
 $("copyResult").addEventListener("click", async () => {
   const btn = $("copyResult");
-  try { await navigator.clipboard.writeText($("reportBody").dataset.raw || ""); btn.textContent = "Đã chép ✓"; }
-  catch { btn.textContent = "Không chép được"; }
-  setTimeout(() => { btn.textContent = "Sao chép"; }, 1800);
+  try { await navigator.clipboard.writeText($("reportBody").dataset.raw || ""); setLabel(btn, "check", t("report.copied")); }
+  catch { setLabel(btn, "alert", t("report.copyFail")); }
+  setTimeout(() => { setLabel(btn, "copy", t("report.copy")); }, 1800);
 });
+
+// Tiêu đề: dòng tiêu đề Markdown đầu tiên, nếu không có thì dòng chữ đầu tiên.
+function reportTitle(text) {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  const heading = lines.find(l => /^#{1,6}\s/.test(l));
+  const raw = (heading || lines[0] || "").replace(/^#{1,6}\s+/, "").replace(/[*_`>#|]/g, "").trim();
+  return raw.length > 90 ? `${raw.slice(0, 88)}…` : raw || t("report.untitled");
+}
+
+// Nút xoá cần bấm 2 lần (trong 3 giây) để tránh xoá nhầm.
+function armOnce(btn, label, run) {
+  if (btn.dataset.armed === "1") { btn.dataset.armed = ""; btn.classList.remove("armed"); run(); return; }
+  btn.dataset.armed = "1";
+  btn.classList.add("armed");
+  const normal = btn.innerHTML;
+  setLabel(btn, "alert", label);
+  setTimeout(() => {
+    if (btn.dataset.armed !== "1") return;
+    btn.dataset.armed = "";
+    btn.classList.remove("armed");
+    btn.innerHTML = normal;
+    delete btn.dataset.label;
+  }, 3000);
+}
+
+function renderReportActions() {
+  $("reportFoot").hidden = !report.id;
+  const save = $("saveReport"), del = $("deleteReport");
+  const saved = !!(report.id && archived(report.id));
+  save.disabled = saved;
+  save.classList.toggle("is-saved", saved);
+  setLabel(save, saved ? "check" : "save", saved ? t("report.saved") : t("report.save"));
+  if (del.dataset.armed !== "1") setLabel(del, "trash", t("report.delete"));
+  const exp = $("reportExpand");
+  const key = reportView.expanded ? "report.shrink" : "report.expand";
+  exp.innerHTML = icon(reportView.expanded ? "shrink" : "expand");
+  exp.title = t(key);
+  exp.setAttribute("aria-label", t(key));
+  exp.setAttribute("aria-pressed", String(reportView.expanded));
+}
+
+function setExpanded(on) {
+  if (reportView.expanded === on) return;
+  reportView.expanded = on;
+  if (on && !ui.report) { ui.report = true; applyPanels(); }
+  $("reportPanel").classList.toggle("expanded", on);
+  $("reportBackdrop").hidden = !on;
+  renderReportActions();
+  layoutView();
+}
+$("reportExpand").addEventListener("click", () => setExpanded(!reportView.expanded));
+$("reportBackdrop").addEventListener("click", () => setExpanded(false));
+
+// Các cảnh của Giám đốc không chen ngang màn chào khách.
+const managerFree = () => !onboarding.greeting;
+
+function saveReport() {
+  if (!report.id || archived(report.id)) return;
+  if (archive.length >= ARCHIVE_MAX) { toast(t("cabinet.full", { n: archive.length }), 4500, "alert"); return; }
+  const entry = { id: report.id, title: reportTitle(report.text), text: report.text, meta: report.meta, savedAt: Date.now() };
+  archive.unshift(entry);
+  if (!store.set(ARCHIVE_KEY, archive)) { archive.shift(); toast(t("cabinet.storageFail"), 5000, "alert"); return; }
+  renderReportActions();
+  renderCabinet();
+  toast(t("report.toastSaved"), 3500, "cabinet");
+  log(t("log.filed", { title: entry.title }), "job");
+  const filed = () => { runtime.archiveCount = archive.length; };
+  if (managerFree()) fileReportScene(filed); else filed();
+}
+
+function deleteReport(id) {
+  if (!id) return;
+  if (archived(id)) {
+    archive = archive.filter(e => e.id !== id);
+    store.set(ARCHIVE_KEY, archive);
+    runtime.archiveCount = archive.length;
+  }
+  if (report.id === id) {
+    showReport("");
+    try { localStorage.removeItem(REPORT_KEY); } catch { /* bỏ qua */ }
+  }
+  renderCabinet();
+  toast(t("report.toastDeleted"), 3500, "trash");
+  if (managerFree()) trashReportScene();
+}
+$("saveReport").addEventListener("click", saveReport);
+$("deleteReport").addEventListener("click", () => {
+  const btn = $("deleteReport");
+  armOnce(btn, t("report.confirmDelete"), () => {
+    setLabel(btn, "trash", t("report.delete"));
+    deleteReport(report.id);
+  });
+});
+
+// ---- Tủ hồ sơ ----
+function renderCabinet() {
+  $("cabinetCount").textContent = t("cabinet.count", { n: archive.length, max: ARCHIVE_MAX });
+  const list = $("cabinetList");
+  if (!archive.length) {
+    list.replaceChildren(Object.assign(document.createElement("li"), { className: "cabinet-empty", textContent: t("cabinet.empty") }));
+    return;
+  }
+  list.replaceChildren(...archive.map(entry => {
+    const li = document.createElement("li");
+    li.className = `cabinet-item${entry.id === report.id ? " current" : ""}`;
+    li.dataset.id = entry.id;
+    li.innerHTML = `<span class="folder">${icon("folder")}</span><div class="info"><strong></strong><small></small></div>
+      <div class="actions"><button class="secondary small" type="button" data-act="view"></button><button class="danger small" type="button" data-act="delete"></button></div>`;
+    li.querySelector("strong").textContent = entry.title;
+    if (entry.id === report.id) li.querySelector("strong").append(Object.assign(document.createElement("span"), { className: "tag", textContent: `· ${t("cabinet.current")}` }));
+    li.querySelector("small").textContent = `${fmtDateTime(new Date(entry.savedAt))}${entry.meta ? ` · ${entry.meta}` : ""}`;
+    li.querySelector("small").title = entry.meta || "";
+    const viewBtn = li.querySelector('[data-act="view"]');
+    setLabel(viewBtn, "eye", t("cabinet.view"));
+    viewBtn.addEventListener("click", () => {
+      showReport(entry.text, entry.meta || t("report.fromArchive", { time: fmtDateTime(new Date(entry.savedAt)) }), { id: entry.id });
+      closeCabinet();
+      setExpanded(true);
+    });
+    const del = li.querySelector('[data-act="delete"]');
+    setLabel(del, "trash", t("cabinet.delete"));
+    del.addEventListener("click", () => armOnce(del, t("cabinet.confirm"), () => {
+      li.classList.add("leaving");
+      setTimeout(() => deleteReport(entry.id), 320);
+    }));
+    return li;
+  }));
+}
+function openCabinet() {
+  if (!$("pledge").hidden || editor.open) return;
+  renderCabinet();
+  $("cabinet").hidden = false;
+  $("cabinetClose").focus();
+}
+function closeCabinet() { $("cabinet").hidden = true; }
+$("openCabinet").addEventListener("click", openCabinet);
+$("cabinetClose").addEventListener("click", closeCabinet);
+$("cabinet").addEventListener("click", event => { if (event.target === $("cabinet")) closeCabinet(); });
 
 function renderClient() {
   $("clientBadge").hidden = !client;
-  if (client) $("clientBadge").textContent = `👤 Quý khách ${client.name}`;
+  if (client) setLabel($("clientBadge"), "user", t("client.badge", { name: client.name }));
   $("clientInfo").textContent = client
-    ? `Quý khách ${client.name} · ký ngày ${new Date(client.signedAt).toLocaleDateString("vi-VN")} · ${client.docNo}`
-    : "Chưa ký đơn cam kết.";
+    ? t("client.info", { name: client.name, date: fmtDate(new Date(client.signedAt)), no: client.docNo })
+    : t("client.unsigned");
   $("viewPledge").disabled = !client;
   refreshControls();
 }
@@ -752,11 +993,11 @@ const WS_URL = OFFLINE ? null
   : API_BASE ? API_BASE.replace(/^http/, "ws") + "/ws"
     : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
 
-const net = { socket: null, connected: false, busy: false, retry: 1000, modelsLoaded: false, submitting: false, jobStartedAt: 0, lastPrompt: "" };
+const net = { models: null, socket: null, connected: false, busy: false, retry: 1000, modelsLoaded: false, submitting: false, jobStartedAt: 0, lastPrompt: "" };
 
 function idleStatus() {
-  if (OFFLINE) setStatus("Bản xem thử trên GitHub Pages – chưa có máy chủ AI. “Giao việc” sẽ chạy mô phỏng với dữ liệu hư cấu.", "busy");
-  else if (net.connected) setStatus(client ? `Sẵn sàng phục vụ Quý khách ${client.name}.` : "Đã kết nối.", "ok");
+  if (OFFLINE) setStatus(t("status.offline"), "busy");
+  else if (net.connected) setStatus(client ? t("status.ready", { client: clientName(client.name) }) : t("status.connected"), "ok");
 }
 
 function setStatus(text, tone = "") {
@@ -768,10 +1009,10 @@ function refreshControls() {
   const btn = $("missionButton");
   const busy = net.busy || isDemoRunning();
   btn.disabled = !client || busy || net.submitting || (!OFFLINE && (!net.connected || !net.modelsLoaded));
-  btn.textContent = busy ? "⏳ Đang làm…" : net.submitting ? "Đang gửi…" : OFFLINE ? "Giao việc (mô phỏng)" : "Giao việc";
-  btn.title = !client ? "Vui lòng ký Đơn cam kết trước" : "";
+  setLabel(btn, busy || net.submitting ? "spinner" : "send", busy ? t("task.busy") : net.submitting ? t("task.sending") : OFFLINE ? t("task.sendDemo") : t("task.send"));
+  btn.title = !client ? t("task.needPledge") : "";
   $("connDot").dataset.on = String(net.connected);
-  $("connText").textContent = OFFLINE ? "Bản xem thử" : net.connected ? "Đã kết nối" : "Mất kết nối";
+  $("connText").textContent = OFFLINE ? t("conn.preview") : net.connected ? t("conn.on") : t("conn.off");
   $("runDemo").disabled = busy;
 }
 
@@ -790,45 +1031,49 @@ function handleMessage(msg) {
     case "snapshot":
       setBusy(msg.busy);
       for (const [id, st] of Object.entries(msg.agents || {})) applyStatus(id, st.status, st.message, { animate: false });
-      if (msg.result && !$("reportBody").dataset.raw) showReport(msg.result, "Báo cáo gần nhất trên máy chủ");
-      setStatus(msg.busy ? "Văn phòng đang xử lý một nhiệm vụ." : client ? `Sẵn sàng phục vụ Quý khách ${client.name}.` : "Đã kết nối.", msg.busy ? "busy" : "ok");
+      if (msg.result && !$("reportBody").dataset.raw) showReport(msg.result, t("report.fromServer"));
+      if (msg.busy) setStatus(t("status.busy"), "busy"); else idleStatus();
       renderTeam();
       break;
     case "status":
       applyStatus(msg.agent, msg.status, msg.message);
       renderTeam();
-      if (msg.status !== "idle") log(`${TITLES[msg.agent] || msg.agent}: ${msg.message}`, msg.status === "error" ? "error" : "");
+      if (msg.status !== "idle") log(`${titles()[msg.agent] || msg.agent}: ${msg.message}`, msg.status === "error" ? "error" : "");
       break;
     case "activity":
       applyActivity(msg.agent, msg.kind, msg.message);
       break;
     case "handoff":
       applyHandoff(msg.from, msg.to);
-      log(`${TITLES[msg.from]} → ${TITLES[msg.to]}: bàn giao${msg.message ? ` “${msg.message}”` : ""}`, "handoff");
+      log(t("log.handoff", { from: titles()[msg.from], to: titles()[msg.to], msg: msg.message ? ` “${msg.message}”` : "" }), "handoff");
       break;
     case "job":
       if (msg.state === "started") {
         setBusy(true);
         net.jobStartedAt = Date.now();
-        setStatus(`Đã nhận nhiệm vụ: ${msg.prompt}`, "busy");
-        log(`Nhiệm vụ mới: ${msg.prompt}`, "job");
+        setStatus(t("status.accepted", { prompt: msg.prompt }), "busy");
+        log(t("log.newJob", { prompt: msg.prompt }), "job");
       } else if (msg.state === "finished") {
         setBusy(false);
         const secs = Math.round((Date.now() - net.jobStartedAt) / 1000);
-        const meta = `Gửi: Quý khách ${client?.name || "—"} · ${new Date().toLocaleString("vi-VN")} · ${msg.demo ? "MÔ PHỎNG" : `${modelLabel("leaderSelect")} + ${modelLabel("workerSelect")}`} · ${secs}s`;
-        showReport(msg.result || "", meta);
-        store.set(REPORT_KEY, { text: msg.result || "", meta });
-        setStatus("Hoàn thành! Báo cáo đầu tư ở khung bên trái.", "ok");
-        log("Giám đốc đầu tư đã ký duyệt báo cáo.", "job");
+        const meta = t("report.meta", {
+          client: client ? clientName(client.name) : "—",
+          time: fmtDateTime(),
+          models: msg.demo ? t("report.demoTag") : `${modelLabel("leaderSelect")} + ${modelLabel("workerSelect")}`,
+          secs,
+        });
+        showReport(msg.result || "", meta, { persist: true });
+        setStatus(t("status.done"), "ok");
+        log(t("log.approved"), "job");
         runScript("manager", [
-          { say: client ? `Báo cáo đã sẵn sàng, mời Quý khách ${client.name} xem.` : "Báo cáo đã sẵn sàng!", face: "S", gesture: "wave", seconds: 3.5 },
+          { say: client ? t("greet.reportReady", { client: clientName(client.name) }) : t("greet.reportReadyAnon"), face: "S", gesture: "wave", seconds: 3.5 },
           { home: true },
         ]);
       } else if (msg.state === "failed") {
         setBusy(false);
-        showReport(`Nhiệm vụ thất bại:\n${msg.error}`, null, { error: true });
-        setStatus(`Lỗi: ${msg.error}`, "error");
-        log(`Nhiệm vụ thất bại: ${msg.error}`, "error");
+        showReport(t("report.failed", { error: msg.error }), null, { error: true });
+        setStatus(t("status.error", { error: msg.error }), "error");
+        log(t("log.failed", { error: msg.error }), "error");
       }
       break;
   }
@@ -844,12 +1089,12 @@ function connect() {
     if (!net.modelsLoaded) loadModels();
   };
   socket.onmessage = event => {
-    try { handleMessage(JSON.parse(event.data)); } catch (error) { console.error("Tin nhắn không hợp lệ", error); }
+    try { handleMessage(JSON.parse(event.data)); } catch (error) { console.error("Invalid message", error); }
   };
   socket.onclose = () => {
     net.connected = false;
     refreshControls();
-    setStatus(`Mất kết nối backend – thử lại sau ${Math.round(net.retry / 1000)} giây… (vẫn có thể chạy mô phỏng trong menu ☰)`, "error");
+    setStatus(t("status.disconnected", { s: Math.round(net.retry / 1000) }), "error");
     setTimeout(connect, net.retry);
     net.retry = Math.min(net.retry * 2, 10000);
   };
@@ -864,24 +1109,35 @@ async function loadModels() {
     let saved = store.get(MODEL_KEY, {});
     const defaultsKey = `${data.defaults.leader}|${data.defaults.team}`;
     if (saved.defaults !== defaultsKey) { saved = { defaults: defaultsKey }; store.set(MODEL_KEY, saved); }
+    net.models = data.models;
+    renderModels();
     for (const [selectId, role] of [["leaderSelect", "leader"], ["workerSelect", "team"]]) {
       const select = $(selectId);
-      select.replaceChildren(...data.models.map(m => {
-        const opt = new Option(m.available ? m.label : `${m.label} (thiếu API key)`, m.id);
-        opt.disabled = !m.available;
-        return opt;
-      }));
       const want = [saved[role], data.defaults[role]].find(id => data.models.some(m => m.id === id && m.available));
       if (want) select.value = want;
       else { const first = data.models.find(m => m.available); if (first) select.value = first.id; }
     }
     net.modelsLoaded = data.models.some(m => m.available);
-    if (!net.modelsLoaded) setStatus("Chưa có API key nào trong .env – thêm key rồi khởi động lại backend.", "error");
+    if (!net.modelsLoaded) setStatus(t("status.noKeys"), "error");
   } catch (error) {
     net.modelsLoaded = false;
-    setStatus(`Không tải được danh sách model: ${error.message}`, "error");
+    setStatus(t("status.modelsFail", { error: error.message }), "error");
   }
   refreshControls();
+}
+// Vẽ lại danh sách model (giữ lựa chọn hiện tại) – gọi cả khi đổi ngôn ngữ.
+function renderModels() {
+  if (!net.models) return;
+  for (const selectId of ["leaderSelect", "workerSelect"]) {
+    const select = $(selectId);
+    const current = select.value;
+    select.replaceChildren(...net.models.map(m => {
+      const opt = new Option(m.available ? m.label : `${m.label} ${t("models.noKey")}`, m.id);
+      opt.disabled = !m.available;
+      return opt;
+    }));
+    if (net.models.some(m => m.id === current && m.available)) select.value = current;
+  }
 }
 for (const [selectId, role] of [["leaderSelect", "leader"], ["workerSelect", "team"]]) {
   $(selectId).addEventListener("change", () => store.set(MODEL_KEY, { ...store.get(MODEL_KEY, {}), [role]: $(selectId).value }));
@@ -889,11 +1145,11 @@ for (const [selectId, role] of [["leaderSelect", "leader"], ["workerSelect", "te
 
 async function startMission() {
   const prompt = $("taskInput").value.trim();
-  if (!client) { setStatus("Quý khách cần ký Đơn cam kết trước khi giao việc.", "error"); return; }
-  if (!prompt) { setStatus("Hãy nhập yêu cầu cho văn phòng trước đã.", "error"); $("taskInput").focus(); return; }
+  if (!client) { setStatus(t("status.needPledge"), "error"); return; }
+  if (!prompt) { setStatus(t("status.emptyPrompt"), "error"); $("taskInput").focus(); return; }
   if (net.busy || net.submitting || isDemoRunning()) return;
   if (OFFLINE) {
-    toast("▶ Bản xem thử: chạy mô phỏng – không gọi AI, dữ liệu hư cấu");
+    toast(t("toast.demoOffline"), 3500, "play");
     runDemo(handleMessage, client.name, prompt).finally(refreshControls);
     refreshControls();
     return;
@@ -904,18 +1160,18 @@ async function startMission() {
     const res = await fetch(`${API_BASE}/api/tasks`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, client_name: client.name, manager_choice: $("leaderSelect").value, worker_choice: $("workerSelect").value }),
+      body: JSON.stringify({ prompt, language: getLang(), client_name: client.name, manager_choice: $("leaderSelect").value, worker_choice: $("workerSelect").value }),
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const detail = typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
-      setStatus(`Không giao được việc: ${detail}`, "error");
-      log(`Không giao được việc: ${detail}`, "error");
+      setStatus(t("status.rejected", { detail }), "error");
+      log(t("status.rejected", { detail }), "error");
     } else {
       net.lastPrompt = prompt;
     }
   } catch (error) {
-    setStatus(`Không gửi được tới backend: ${error.message}`, "error");
+    setStatus(t("status.sendFail", { error: error.message }), "error");
   } finally {
     net.submitting = false;
     refreshControls();
@@ -930,8 +1186,8 @@ $("taskInput").addEventListener("keydown", event => {
 $("runDemo").addEventListener("click", () => {
   if (net.busy) return;
   setDrawer(false);
-  toast("▶ Đang chạy mô phỏng – không gọi API, dữ liệu hư cấu");
-  runDemo(handleMessage, client?.name || "Khách").finally(refreshControls);
+  toast(t("toast.demo"), 3500, "play");
+  runDemo(handleMessage, client?.name || t("client.guest")).finally(refreshControls);
   refreshControls();
 });
 
@@ -956,24 +1212,24 @@ async function firstVisit({ withIntro = true } = {}) {
   let signedDone = false;
   onboarding.greeting = true;
   runScript("manager", [
-    { goto: GREET_SPOT, say: "Ồ, có khách!" },
+    { goto: GREET_SPOT, say: t("greet.ohGuest") },
     { call: () => zoomTo("manager") },
-    { say: "Xin chào! Chào mừng Quý khách đến với Mini Capital.", face: "S", gesture: "wave", seconds: 3.6 },
-    { say: "Tôi là Giám đốc đầu tư. Đội ngũ AI của chúng tôi nghiên cứu cổ phiếu theo yêu cầu của Quý khách.", face: "S" },
-    { say: "Trước khi bắt đầu, mời Quý khách đọc và ký Đơn cam kết.", face: "S", seconds: 2.6 },
+    { say: t("greet.hello"), face: "S", gesture: "wave", seconds: 3.6 },
+    { say: t("greet.intro"), face: "S" },
+    { say: t("greet.pledge"), face: "S", seconds: 2.6 },
     { call: () => readyForPledge() },
-    { waitUntil: () => signedDone, face: "S", say: "Mời Quý khách xem kỹ các điều khoản…" },
+    { waitUntil: () => signedDone, face: "S", say: t("greet.readTerms") },
   ]);
   await ready;
   const signed = await openPledge({ mode: "sign" });
   signedDone = true;
   client = signed;
   renderClient();
-  log(`Quý khách ${client.name} đã ký Đơn cam kết (${client.docNo}).`, "job");
-  toast(`✅ Đã ký cam kết – chào mừng Quý khách ${client.name}!`);
+  log(t("log.signed", { client: clientName(client.name), no: client.docNo }), "job");
+  toast(t("toast.signed", { client: clientName(client.name) }), 3500, "check");
   runScript("manager", [
-    { say: `Cảm ơn Quý khách ${client.name}! Rất hân hạnh được đồng hành cùng Quý khách.`, face: "S", gesture: "wave" },
-    { say: "Mời Quý khách giao nhiệm vụ ở khung phía dưới.", face: "S", seconds: 3 },
+    { say: t("greet.thanks", { client: clientName(client.name) }), face: "S", gesture: "wave" },
+    { say: t("greet.giveTask"), face: "S", seconds: 3 },
     { call: () => { zoomOut(); updateZoomUi(); } },
     { home: true },
   ]);
@@ -988,9 +1244,9 @@ async function returningVisit() {
   document.body.classList.remove("booting");
   layoutView();
   await delay(900);
-  toast(`👋 Chào mừng Quý khách ${client.name} quay lại!`);
+  toast(t("toast.welcomeBack", { client: clientName(client.name) }), 3500, "smile");
   runScript("manager", [
-    { say: `Chào mừng Quý khách ${client.name} quay lại!`, face: "S", gesture: "wave", seconds: 3.2 },
+    { say: t("greet.welcomeBack", { client: clientName(client.name) }), face: "S", gesture: "wave", seconds: 3.2 },
     { home: true },
   ]);
 }
@@ -1002,9 +1258,9 @@ $("resignPledge").addEventListener("click", async () => {
   if (!signed) return;
   client = signed;
   renderClient();
-  log(`Quý khách ${client.name} đã ký Đơn cam kết (${client.docNo}).`, "job");
-  toast(`✅ Văn phòng sẽ làm việc với Quý khách ${client.name}`);
-  runScript("manager", [{ say: `Rất vui được làm việc với Quý khách ${client.name}!`, face: "S", gesture: "wave", seconds: 3 }, { home: true }]);
+  log(t("log.signed", { client: clientName(client.name), no: client.docNo }), "job");
+  toast(t("toast.resigned", { client: clientName(client.name) }), 3500, "check");
+  runScript("manager", [{ say: t("greet.resigned", { client: clientName(client.name) }), face: "S", gesture: "wave", seconds: 3 }, { home: true }]);
 });
 $("replayIntro").addEventListener("click", async () => {
   setDrawer(false);
@@ -1018,20 +1274,47 @@ $("replayIntro").addEventListener("click", async () => {
 });
 
 // ===========================================================================
+// Ngôn ngữ
+// ===========================================================================
+const langSelect = $("langSelect");
+langSelect.replaceChildren(...LANGS.map(l => new Option(l.label, l.code)));
+langSelect.value = getLang();
+langSelect.addEventListener("change", () => setLang(langSelect.value));
+
+window.addEventListener("langchange", () => {
+  langSelect.value = getLang();
+  renameStaff();
+  renderAssignmentOptions();
+  renderModels();
+  if (OFFLINE) for (const id of ["leaderSelect", "workerSelect"]) $(id).options[0].text = t("models.offline");
+  furnToggleLabel();
+  renderEditor();
+  renderTeam();
+  renderClient();
+  renderReportActions();
+  if (!$("cabinet").hidden) renderCabinet();
+  if (!net.busy && !isDemoRunning()) idleStatus();
+});
+
+// ===========================================================================
 // Khởi động
 // ===========================================================================
+applyI18n();
+furnToggleLabel();
+setStatus(t("status.connecting"));
+$("connText").textContent = t("conn.connecting");
 commitLayout({ persist: false });
 seatEveryone();
 applyPanels();
 renderTeam();
 renderClient();
-log("Văn phòng mở cửa.", "");
+log(t("log.open"), "");
 const lastReport = store.get(REPORT_KEY, null);
-if (lastReport?.text) showReport(lastReport.text, lastReport.meta);
+if (lastReport?.text) showReport(lastReport.text, lastReport.meta, { id: lastReport.id || null, persist: !lastReport.id });
 layoutView();
 if (OFFLINE) {
   for (const id of ["leaderSelect", "workerSelect"]) {
-    $(id).replaceChildren(new Option("Không có máy chủ AI – chế độ mô phỏng", ""));
+    $(id).replaceChildren(new Option(t("models.offline"), ""));
     $(id).disabled = true;
   }
   idleStatus();
@@ -1043,4 +1326,11 @@ requestAnimationFrame(frame);
 if (client) returningVisit(); else firstVisit();
 
 // office.simulate({...}) cho phép thử luồng sự kiện mà không cần gọi LLM thật.
-window.office = { staff, get layout() { return layout; }, ISO, simulate: handleMessage, cancelDemo };
+// screenOf(x, y, z): toạ độ màn hình của một điểm trong phòng (cho kiểm thử tự động).
+window.office = {
+  staff, get layout() { return layout; }, ISO, simulate: handleMessage, cancelDemo,
+  screenOf(x, y, z = 0) {
+    const p = project(x, y, z), s = view.scale * camera.zoom;
+    return { x: view.cx + (p.x - camera.focus.x) * s, y: view.cy + (p.y - camera.focus.y) * s };
+  },
+};

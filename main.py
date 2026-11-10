@@ -14,7 +14,7 @@ import re
 import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -59,7 +59,7 @@ MODELS: dict[str, dict[str, str]] = {
     # Gói API miễn phí tính hạn mức RIÊNG cho từng model: hết lượt model này thì đổi sang model khác.
     "gemini-3.8-flash": {"label": "Gemini 3.8 Flash", "model": "gemini/gemini-3.8-flash", "env": "GEMINI_API_KEY"},
     "gemini-3.5-flash": {"label": "Gemini 3.5 Flash", "model": "gemini/gemini-3.5-flash", "env": "GEMINI_API_KEY"},
-    "gemini-3.1-flash-lite": {"label": "Gemini 3.1 Flash Lite (rẻ nhất)", "model": "gemini/gemini-3.1-flash-lite", "env": "GEMINI_API_KEY"},
+    "gemini-3.1-flash-lite": {"label": "Gemini 3.1 Flash Lite", "model": "gemini/gemini-3.1-flash-lite", "env": "GEMINI_API_KEY"},
     "gemini-3.1-pro": {"label": "Gemini 3.1 Pro (preview)", "model": "gemini/gemini-3.1-pro-preview", "env": "GEMINI_API_KEY"},
     "gpt-5.5": {"label": "GPT-5.5", "model": "openai/gpt-5.5", "env": "OPENAI_API_KEY"},
     "gpt-5.4-mini": {"label": "GPT-5.4 Mini", "model": "openai/gpt-5.4-mini", "env": "OPENAI_API_KEY"},
@@ -159,9 +159,66 @@ DATA_RULES = (
 )
 
 
-def build_crew(prompt: str, leader_key: str, team_key: str, client: str):
+# ---------------------------------------------------------------------------
+# Đa ngôn ngữ: báo cáo + thông báo trạng thái + lỗi theo ngôn ngữ người dùng chọn (vi / en / ja).
+# ---------------------------------------------------------------------------
+LANG_NAME = {"vi": "tiếng Việt", "en": "English", "ja": "日本語 (Japanese)"}
+CLIENT_ADDRESS = {"vi": "Quý khách {name}", "en": "{name}", "ja": "{name}様"}
+
+MSG = {
+    "vi": {
+        "assigning": "Đang phân công công việc", "monitoring": "Đã giao việc, theo dõi tiến độ",
+        "work": {"analyst": "Đang nghiên cứu doanh nghiệp", "quant": "Đang định giá & lập kịch bản",
+                 "risk": "Đang thẩm định rủi ro", "manager": "Đang viết báo cáo đầu tư"},
+        "done": "Xong phần việc", "ready": "Sẵn sàng cho việc tiếp theo", "stopped": "Dừng do lỗi",
+        "task_error": "Lỗi: {error}",
+        "bad_model": "Model không hợp lệ: {key}", "no_key": "Chưa có {env} trong .env cho {label}.",
+        "busy": "Văn phòng đang bận một nhiệm vụ khác.",
+        "retry_in": " Thử lại sau khoảng {wait}.", "minutes": "{n} phút",
+        "quota_day": "Hết hạn mức MIỄN PHÍ trong ngày của {models}.{wait} Mỗi model có hạn mức riêng – hãy chọn model khác (vd. Gemini 3.5 Flash / 3.1 Flash Lite) hoặc bật Billing cho API key trong AI Studio.",
+        "quota_min": "Gọi {models} quá nhanh so với hạn mức theo phút.{wait} Đợi một chút rồi gửi lại, hoặc giảm CREW_MAX_RPM trong .env.",
+        "not_found": "Model {models} không tồn tại hoặc API key không có quyền dùng. Hãy chọn model khác.",
+        "auth": "API key không hợp lệ hoặc không có quyền. Kiểm tra lại key trong .env rồi khởi động lại backend.",
+    },
+    "en": {
+        "assigning": "Assigning tasks", "monitoring": "Tasks assigned, monitoring progress",
+        "work": {"analyst": "Researching the company", "quant": "Valuing & building scenarios",
+                 "risk": "Reviewing risks", "manager": "Writing the investment report"},
+        "done": "Part done", "ready": "Ready for the next task", "stopped": "Stopped due to an error",
+        "task_error": "Error: {error}",
+        "bad_model": "Invalid model: {key}", "no_key": "{env} is missing in .env for {label}.",
+        "busy": "The office is busy with another task.",
+        "retry_in": " Try again in about {wait}.", "minutes": "{n} min",
+        "quota_day": "The FREE daily quota for {models} is used up.{wait} Each model has its own quota – pick another model (e.g. Gemini 3.5 Flash / 3.1 Flash Lite) or enable Billing for the API key in AI Studio.",
+        "quota_min": "{models} was called faster than the per-minute quota allows.{wait} Wait a moment and resend, or lower CREW_MAX_RPM in .env.",
+        "not_found": "Model {models} doesn't exist or the API key can't use it. Please choose another model.",
+        "auth": "The API key is invalid or lacks permission. Check the key in .env and restart the backend.",
+    },
+    "ja": {
+        "assigning": "タスクを割り振り中", "monitoring": "割り振り完了、進捗を確認中",
+        "work": {"analyst": "企業を調査中", "quant": "バリュエーションとシナリオ作成中",
+                 "risk": "リスクを審査中", "manager": "投資レポートを作成中"},
+        "done": "担当完了", "ready": "次のタスクの準備OK", "stopped": "エラーで停止",
+        "task_error": "エラー：{error}",
+        "bad_model": "無効なモデル：{key}", "no_key": "{label} 用の {env} が .env にありません。",
+        "busy": "オフィスは別のタスクを処理中です。",
+        "retry_in": " 約{wait}後に再試行してください。", "minutes": "{n}分",
+        "quota_day": "{models} の無料枠（1日分）を使い切りました。{wait} 無料枠はモデルごとに別なので、他のモデル（例：Gemini 3.5 Flash / 3.1 Flash Lite）を選ぶか、AI Studio でAPIキーの課金を有効にしてください。",
+        "quota_min": "{models} の1分あたりの上限を超える速さで呼び出しました。{wait} 少し待ってから再送するか、.env の CREW_MAX_RPM を下げてください。",
+        "not_found": "モデル {models} が存在しないか、APIキーで利用できません。別のモデルを選んでください。",
+        "auth": "APIキーが無効か権限がありません。.env のキーを確認し、バックエンドを再起動してください。",
+    },
+}
+
+
+def build_crew(prompt: str, leader_key: str, team_key: str, client: str, lang: str = "vi"):
     leader_llm, team_llm = build_llm(leader_key), build_llm(team_key)
-    brief = f"Khách hàng: Quý khách {client}\nYêu cầu của khách hàng:\n{prompt}\n\n{DATA_RULES}"
+    addressed = CLIENT_ADDRESS[lang].format(name=client)
+    brief = (
+        f"Khách hàng: {addressed}\nYêu cầu của khách hàng:\n{prompt}\n\n{DATA_RULES}\n\n"
+        f"NGÔN NGỮ ĐẦU RA: viết TOÀN BỘ câu trả lời bằng {LANG_NAME[lang]} (kể cả tiêu đề các mục và phần miễn trừ trách nhiệm); "
+        f"xưng hô với khách hàng là \"{addressed}\"."
+    )
 
     analyst = Agent(
         role="Chuyên viên phân tích",
@@ -218,7 +275,7 @@ def build_crew(prompt: str, leader_key: str, team_key: str, client: str):
     )
     report = Task(
         description=(
-            f"{brief}\n\nNhiệm vụ: viết BÁO CÁO ĐẦU TƯ gửi Quý khách {client} bằng Markdown, gồm: "
+            f"{brief}\n\nNhiệm vụ: viết BÁO CÁO ĐẦU TƯ gửi {addressed} bằng Markdown, gồm: "
             "1) Tóm tắt khuyến nghị (Mua / Nắm giữ / Bán / Theo dõi) và mức độ tin cậy; 2) Luận điểm đầu tư; "
             "3) Định giá & kịch bản; 4) Kế hoạch phân bổ vốn; 5) Rủi ro & cách kiểm soát; 6) Việc khách hàng nên kiểm chứng thêm. "
             "Kết thúc bằng mục 'Miễn trừ trách nhiệm': báo cáo do AI tạo, không phải tư vấn đầu tư được cấp phép, "
@@ -242,50 +299,44 @@ def build_crew(prompt: str, leader_key: str, team_key: str, client: str):
     return crew, agent_ids, task_ids, order
 
 
-WORKING_TEXT = {
-    "analyst": ("working", "Đang nghiên cứu doanh nghiệp"),
-    "quant": ("working", "Đang định giá & lập kịch bản"),
-    "risk": ("working", "Đang thẩm định rủi ro"),
-    "manager": ("reviewing", "Đang viết báo cáo đầu tư"),
-}
+WORKING_STATUS = {"analyst": "working", "quant": "working", "risk": "working", "manager": "reviewing"}
 
 
-def explain_error(exc: Exception, leader_key: str, team_key: str) -> str:
-    """Đổi các lỗi hay gặp của nhà cung cấp LLM thành câu dễ hiểu."""
+def explain_error(exc: Exception, leader_key: str, team_key: str, lang: str = "vi") -> str:
+    """Đổi các lỗi hay gặp của nhà cung cấp LLM thành câu dễ hiểu (theo ngôn ngữ người dùng)."""
+    M = MSG[lang]
     text = str(exc)
     models = " / ".join(dict.fromkeys(MODELS[k]["label"] for k in (leader_key, team_key)))
     if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
         retry = re.search(r"retry in (\d[\dhms.]*?)\.?\s|'retryDelay': '(\d+)s'", text + " ")
         wait = ""
         if retry:
-            wait = f" Thử lại sau khoảng {retry.group(1) or f'{int(retry.group(2)) // 60 + 1} phút'}."
-        if "PerDay" in text:
-            return (f"Hết hạn mức MIỄN PHÍ trong ngày của {models}.{wait} "
-                    "Mỗi model có hạn mức riêng – hãy chọn model khác (vd. Gemini 3.5 Flash / 3.1 Flash Lite) "
-                    "hoặc bật Billing cho API key trong AI Studio.")
-        return (f"Gọi {models} quá nhanh so với hạn mức theo phút.{wait} "
-                "Đợi một chút rồi gửi lại, hoặc giảm CREW_MAX_RPM trong .env.")
+            amount = retry.group(1) or M["minutes"].format(n=int(retry.group(2)) // 60 + 1)
+            wait = M["retry_in"].format(wait=amount)
+        key = "quota_day" if "PerDay" in text else "quota_min"
+        return M[key].format(models=models, wait=wait)
     if "404" in text and "NOT_FOUND" in text:
-        return f"Model {models} không tồn tại hoặc API key không có quyền dùng. Hãy chọn model khác."
+        return M["not_found"].format(models=models)
     if "401" in text or "403" in text or "API key not valid" in text:
-        return "API key không hợp lệ hoặc không có quyền. Kiểm tra lại key trong .env rồi khởi động lại backend."
+        return M["auth"]
     return short(f"{type(exc).__name__}: {exc}", 300)
 
 
-def run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
+def run_job(prompt: str, leader_key: str, team_key: str, client: str, lang: str = "vi") -> None:
     try:
-        _run_job(prompt, leader_key, team_key, client)
+        _run_job(prompt, leader_key, team_key, client, lang)
     except Exception as exc:  # noqa: BLE001 – vd. lỗi khi khởi tạo LLM/agent
         for sid in STAFF_IDS:
-            office.status(sid, "idle", "Dừng do lỗi")
-        office.emit({"type": "job", "state": "failed", "error": explain_error(exc, leader_key, team_key)})
+            office.status(sid, "idle", MSG[lang]["stopped"])
+        office.emit({"type": "job", "state": "failed", "error": explain_error(exc, leader_key, team_key, lang)})
     finally:
         office.busy = False
         job_lock.release()
 
 
-def _run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
-    crew, agent_ids, task_ids, order = build_crew(prompt, leader_key, team_key, client)
+def _run_job(prompt: str, leader_key: str, team_key: str, client: str, lang: str = "vi") -> None:
+    M = MSG[lang]
+    crew, agent_ids, task_ids, order = build_crew(prompt, leader_key, team_key, client, lang)
 
     # Ánh xạ theo id() đối tượng; nếu CrewAI có sao chép đối tượng thì rơi về tên vai trò.
     roles = {a.role: sid for a in crew.agents for k, sid in agent_ids.items() if id(a) == k}
@@ -305,16 +356,15 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
     def on_task_started(source, event):
         sid = staff_of_task(event)
         if sid == "analyst":
-            office.status("manager", "idle", "Đã giao việc, theo dõi tiến độ")
+            office.status("manager", "idle", M["monitoring"])
         if sid:
-            status, text = WORKING_TEXT[sid]
-            office.status(sid, status, text)
+            office.status(sid, WORKING_STATUS[sid], M["work"][sid])
 
     def on_task_completed(source, event):
         sid = staff_of_task(event)
         if not sid:
             return
-        office.status(sid, "done", "Xong phần việc")
+        office.status(sid, "done", M["done"])
         idx = order.index(sid)
         if idx + 1 < len(order):
             office.emit({
@@ -325,7 +375,7 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
     def on_task_failed(source, event):
         sid = staff_of_task(event)
         if sid:
-            office.status(sid, "error", short(f"Lỗi: {event.error}"))
+            office.status(sid, "error", short(M["task_error"].format(error=event.error)))
 
     def on_llm_started(source, event):
         sid = staff_of_llm(event)
@@ -357,7 +407,7 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
 
     office.result = str(output)
     for sid in STAFF_IDS:
-        office.status(sid, "idle", "Sẵn sàng cho việc tiếp theo")
+        office.status(sid, "idle", M["ready"])
     office.emit({"type": "job", "state": "finished", "result": office.result})
 
 
@@ -367,6 +417,7 @@ def _run_job(prompt: str, leader_key: str, team_key: str, client: str) -> None:
 class JobInput(BaseModel):
     prompt: str = Field(min_length=1, max_length=8000)
     client_name: str = Field(min_length=1, max_length=60)
+    language: Literal["vi", "en", "ja"] = "vi"
     manager_choice: str = Field(default_factory=lambda: default_model(LEADER_PREFERENCE))
     worker_choice: str = Field(default_factory=lambda: default_model(TEAM_PREFERENCE))
 
@@ -389,26 +440,27 @@ async def list_models() -> dict[str, Any]:
 
 @app.post("/api/tasks", status_code=202)
 async def assign_task(job: JobInput):
+    M = MSG[job.language]
     for key in (job.manager_choice, job.worker_choice):
         if key not in MODELS:
-            return JSONResponse({"detail": f"Model không hợp lệ: {key}"}, status_code=400)
+            return JSONResponse({"detail": M["bad_model"].format(key=key)}, status_code=400)
         if not model_available(key):
             return JSONResponse(
-                {"detail": f"Chưa có {MODELS[key]['env']} trong .env cho {MODELS[key]['label']}."},
+                {"detail": M["no_key"].format(env=MODELS[key]["env"], label=MODELS[key]["label"])},
                 status_code=400,
             )
     if not job_lock.acquire(blocking=False):
-        return JSONResponse({"detail": "Văn phòng đang bận một nhiệm vụ khác."}, status_code=409)
+        return JSONResponse({"detail": M["busy"]}, status_code=409)
 
     office.busy = True
     office.result = None
     office.emit({"type": "job", "state": "started", "prompt": short(job.prompt, 120)})
-    office.status("manager", "thinking", "Đang phân công công việc")
+    office.status("manager", "thinking", M["assigning"])
 
     # Thread riêng (daemon) – không phụ thuộc vào việc giữ tham chiếu asyncio.Task.
     threading.Thread(
         target=run_job,
-        args=(job.prompt, job.manager_choice, job.worker_choice, job.client_name.strip()),
+        args=(job.prompt, job.manager_choice, job.worker_choice, job.client_name.strip(), job.language),
         name="office-job",
         daemon=True,
     ).start()

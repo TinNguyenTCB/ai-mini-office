@@ -1,5 +1,7 @@
 // Màn chào lần đầu + Đơn cam kết (ký tên, đóng mộc đỏ).
 
+import { applyI18n, setLang, t } from "./i18n.js";
+
 const $ = id => document.getElementById(id);
 const CLIENT_KEY = "ai-office-client";
 const reduceMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -37,18 +39,19 @@ export function playIntro() {
       el.hidden = true;
       resolve();
     };
-    $("introSkip").onclick = finish;
-    setTimeout(finish, reduceMotion() ? 1200 : 3900);
+    applyI18n(el);
+    el.querySelectorAll("[data-lang]").forEach(btn => { btn.onclick = () => setLang(btn.dataset.lang); });
+    $("introEnter").onclick = finish;
+    const onKey = e => { if (e.key === "Enter" && !el.hidden) { document.removeEventListener("keydown", onKey); finish(); } };
+    document.addEventListener("keydown", onKey);
+    setTimeout(() => $("introEnter").focus({ preventScroll: true }), reduceMotion() ? 200 : 2600);
   });
 }
 
 // ---------------------------------------------------------------------------
 // Đơn cam kết
 // ---------------------------------------------------------------------------
-function vnDate(d) {
-  return `Ngày ${String(d.getDate()).padStart(2, "0")} tháng ${String(d.getMonth() + 1).padStart(2, "0")} năm ${d.getFullYear()}`;
-}
-const newDocNo = d => `Số: MC-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
+const newDocNo = d => `${t("pledge.no")} MC-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}-${Math.floor(1000 + Math.random() * 9000)}`;
 
 function cleanName(raw) {
   return raw.replace(/\s+/g, " ").trim();
@@ -83,7 +86,7 @@ export function openPledge({ mode = "sign", client = null } = {}) {
 
   const when = client ? new Date(client.signedAt) : new Date();
   $("pledgeNo").textContent = client?.docNo || newDocNo(when);
-  $("pledgeDate").textContent = vnDate(when);
+  $("pledgeDate").textContent = t("pledge.date", when);
   paper.classList.remove("leaving", "thud");
   stamp.classList.remove("stamped", "static");
   sig.classList.remove("written");
@@ -100,7 +103,7 @@ export function openPledge({ mode = "sign", client = null } = {}) {
     stamp.classList.add("static");
     submit.hidden = true;
     close.hidden = false;
-    close.textContent = "Đóng";
+    close.textContent = t("pledge.close");
   } else {
     $("pledgeFields").hidden = false;
     nameInput.value = "";
@@ -112,7 +115,7 @@ export function openPledge({ mode = "sign", client = null } = {}) {
     submit.hidden = false;
     submit.disabled = false;
     close.hidden = mode !== "resign";
-    close.textContent = "Huỷ";
+    close.textContent = t("pledge.cancel");
     setTimeout(() => nameInput.focus(), 350);
   }
 
@@ -134,8 +137,8 @@ export function openPledge({ mode = "sign", client = null } = {}) {
     paper.onsubmit = async event => {
       event.preventDefault();
       const name = cleanName(nameInput.value);
-      if (name.length < 2 || !/\p{L}/u.test(name)) { error.textContent = "Vui lòng nhập họ và tên (ít nhất 2 ký tự)."; nameInput.focus(); return; }
-      if (!agree.checked) { error.textContent = "Quý khách cần đánh dấu đồng ý trước khi ký."; agree.focus(); return; }
+      if (name.length < 2 || !/\p{L}/u.test(name)) { error.textContent = t("pledge.errName"); nameInput.focus(); return; }
+      if (!agree.checked) { error.textContent = t("pledge.errAgree"); agree.focus(); return; }
       error.textContent = "";
       submit.disabled = true;
       nameInput.disabled = true;
