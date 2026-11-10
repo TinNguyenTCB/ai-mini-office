@@ -185,6 +185,7 @@ function runPlan(a) {
       applyFace(a, s.face);
       if (s.speak) a.talking = tick - a.stepState.start < s.ticks - sec(0.6);
       if (s.ink && (tick - a.stepState.start) % 28 === 0) runtime.boardInk = Math.min(8, runtime.boardInk + 1);
+      if (s.erase && (tick - a.stepState.start) % 14 === 7) runtime.boardInk = Math.max(0, runtime.boardInk - 1);
       if (tick - a.stepState.start >= s.ticks || (s.until && s.until(a))) nextStep(a);
       break;
     case "chat":
@@ -454,6 +455,22 @@ export function fileReportScene(onFiled) {
     wait(1.4, { face: cab, holding: "paper", bubble: t("sim.filing"), tone: "speech", speak: true }),
     { type: "do", fn: () => onFiled?.() },
     wait(0.5, { face: cab }),
+    home(),
+  ]);
+  return true;
+}
+
+// Hoàn tất nhiệm vụ: Giám đốc ra bảng trắng xoá sạch kế hoạch cũ.
+export function eraseBoardScene() {
+  const a = staff.manager;
+  const board = nearestOfType(a, "whiteboard");
+  const spot = board && usePoint(board) && nearestWalkable(usePoint(board).x, usePoint(board).y);
+  if (!board || !spot || !reachable(a, spot)) { runtime.boardInk = 0; return false; }
+  setPlan(a, "script", [
+    go(() => spot, { bubble: t("sim.toBoard"), fast: true }),
+    wait(Math.max(1.2, runtime.boardInk * 0.25 + 0.6), { face: board, bubble: t("sim.erasing"), erase: true }),
+    { type: "do", fn: () => { runtime.boardInk = 0; } },
+    wait(1.3, { face: "S", bubble: t("sim.boardClean"), tone: "speech", speak: true }),
     home(),
   ]);
   return true;

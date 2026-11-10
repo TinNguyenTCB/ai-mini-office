@@ -13,7 +13,7 @@
     Chữ hiển thị nằm trong static/js/i18n.js (các thuộc tính data-i18n*); chữ tiếng Việt ở đây chỉ là bản mặc định.
   -->
   <script>
-    window.APP_VERSION = "2026.11.10-13";
+    window.APP_VERSION = "2026.11.10-15";
     (function (v) {
       var modules = ["main", "iso", "furniture", "pathfinding", "characters", "sim", "dialogue", "markdown", "onboarding", "demo", "i18n", "icons", "skyline"];
       var imports = {};
@@ -150,6 +150,21 @@
       <p id="cabinetCount" class="muted"></p>
       <ul id="cabinetList" class="cabinet-list"></ul>
       <p class="muted cabinet-hint" data-i18n="cabinet.hint">Mẹo: bấm vào tủ hồ sơ cạnh bàn Giám đốc để mở tủ.</p>
+    </section>
+  </div>
+
+  <!-- Bảng phân công: nhiệm vụ hiện tại + việc Giám đốc giao cho từng người -->
+  <div id="board" class="modal cabinet-modal" hidden>
+    <section class="cabinet-card board-card glass" role="dialog" aria-modal="true" aria-labelledby="boardTitle">
+      <div class="panel-head">
+        <h2 id="boardTitle" class="ttl"><i data-icon="f-whiteboard"></i><span data-i18n="board.title">Bảng phân công</span></h2>
+        <button id="boardClose" class="icon-btn small" type="button" data-i18n-aria-label="cabinet.close" aria-label="Đóng"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div id="boardBody" class="board-body"></div>
+      <div id="boardActions" class="printer-foot" hidden>
+        <button id="boardClear" class="small" type="button"></button>
+      </div>
+      <p class="muted cabinet-hint" data-i18n="board.hint">Mẹo: bấm vào bảng trắng trong văn phòng để xem nhiệm vụ và phân công.</p>
     </section>
   </div>
 

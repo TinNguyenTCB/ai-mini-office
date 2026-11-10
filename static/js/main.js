@@ -8,7 +8,7 @@ import {
 import { nearestWalkable, rebuild, reachable } from "./pathfinding.js";
 import {
   ORDER, TICK_HZ, agentDrawables, applyActivity, applyHandoff, applyStatus, bubbleOf, effects, fileReportScene, flags,
-  getTick, lookAt, printReportScene, renameStaff, runScript, seatEveryone, setLayout, staff, trashReportScene, update,
+  eraseBoardScene, getTick, lookAt, printReportScene, renameStaff, runScript, seatEveryone, setLayout, staff, trashReportScene, update,
 } from "./sim.js";
 import { drawAgent, drawOverlay, roleColor } from "./characters.js";
 import { duties, titles } from "./dialogue.js";
@@ -476,6 +476,7 @@ canvas.addEventListener("pointerup", event => {
   const type = itemAt(event)?.type;
   if (type === "cabinet") openCabinet();
   else if (type === "printer") openPrinter();
+  else if (type === "whiteboard") openBoard();
 });
 canvas.addEventListener("pointercancel", () => { endPan(); endDrag(); });
 $("zoomInBtn").addEventListener("click", () => zoomAt(view.cx, view.cy, 1.35));
@@ -739,6 +740,7 @@ $("drawerClose").addEventListener("click", () => setDrawer(false));
 document.addEventListener("keydown", event => {
   if (event.key === "Escape" && !$("cabinet").hidden) { closeCabinet(); return; }
   if (event.key === "Escape" && !$("printer").hidden) { closePrinter(); return; }
+  if (event.key === "Escape" && !$("board").hidden) { closeBoard(); return; }
   if (event.key === "Escape" && reportView.expanded) { setExpanded(false); return; }
   const tag = document.activeElement?.tagName;
   if (tag === "TEXTAREA" || tag === "INPUT" || tag === "SELECT") return;
@@ -967,7 +969,7 @@ $("openCabinet").addEventListener("click", openCabinet);
 $("cabinetClose").addEventListener("click", closeCabinet);
 $("cabinet").addEventListener("click", event => { if (event.target === $("cabinet")) closeCabinet(); });
 
-const CLICKABLE = new Set(["cabinet", "printer"]);
+const CLICKABLE = new Set(["cabinet", "printer", "whiteboard"]);
 
 // ---- Máy in: chọn hồ sơ đã lưu, Giám đốc ra máy in, rồi mở hộp thoại in của trình duyệt ----
 const printSel = new Set();
@@ -1036,6 +1038,157 @@ $("printerGo").addEventListener("click", () => {
   if (!managerFree() || !printReportScene(entries.length, go)) go();
   setTimeout(go, 15000); // phòng khi Giám đốc bị kẹt đường
 });
+
+// ---- Bảng phân công: nhiệm vụ hiện tại + việc Giám đốc giao cho từng người (bấm vào bảng trắng) ----
+const BOARD_KEY = "ai-office-board";
+const TASK_ORDER = ["analyst", "quant", "risk", "manager"];
+const TASK_TOOLS = { analyst: "board.tool.full", quant: "board.tool.full", risk: "board.tool.price", manager: null };
+let board = store.get(BOARD_KEY, null);
+if (!board || typeof board !== "object" || !board.tasks) board = null;
+else if (board.state === "planning" || board.state === "running") boardStopped(); // tải lại trang giữa chừng
+let boardTimer = 0;
+
+// Dừng giữa chừng: đồng hồ dừng ở lần cập nhật cuối cùng.
+function boardStopped() {
+  board.state = "stopped";
+  board.endedAt = board.endedAt || board.lastAt || board.startedAt;
+}
+function boardChanged() {
+  if (board) {
+    if (board.state === "planning" || board.state === "running") board.lastAt = Date.now();
+    store.set(BOARD_KEY, board);
+  }
+  if (!$("board").hidden) renderBoard();
+}
+function boardStart(msg) {
+  const demo = isDemoRunning();
+  board = {
+    prompt: net.lastPrompt || String(msg.prompt || ""),
+    client: client ? clientName(client.name) : "",
+    models: demo ? null : (net.pendingModels || null),
+    demo, startedAt: Date.now(), endedAt: 0, state: "planning", error: "",
+    tasks: Object.fromEntries(TASK_ORDER.map(id => [id, { state: "waiting", startedAt: 0, endedAt: 0, tools: 0, note: "", error: "" }])),
+  };
+  boardChanged();
+}
+function boardStatus(id, status, message) {
+  const task = board?.tasks[id];
+  if (!task || board.state === "finished" || board.state === "failed") return;
+  const work = status === "working" || status === "reviewing";
+  if (work && task.state !== "active") {
+    Object.assign(task, { state: "active", startedAt: task.startedAt || Date.now(), error: "" });
+    board.state = "running";
+  } else if (status === "done") {
+    Object.assign(task, { state: "done", endedAt: Date.now() });
+  } else if (status === "error") {
+    Object.assign(task, { state: "error", endedAt: Date.now(), error: message || "" });
+  } else return;
+  boardChanged();
+}
+function boardEnd(state, error = "") {
+  if (!board) return;
+  board.state = state;
+  board.endedAt = Date.now();
+  board.error = error || "";
+  for (const task of Object.values(board.tasks)) {
+    if (state === "finished" && task.state !== "error") Object.assign(task, { state: "done", endedAt: task.endedAt || Date.now() });
+    else if (state !== "finished" && task.state === "active") Object.assign(task, { state: "error", endedAt: Date.now() });
+  }
+  boardChanged();
+}
+
+const fmtDur = ms => {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+const BADGE_ICON = { waiting: "clock", active: "spinner", done: "check", error: "alert" };
+
+function renderBoard() {
+  const body = $("boardBody");
+  const live = !!board && (board.state === "planning" || board.state === "running");
+  $("boardActions").hidden = !board || live;
+  if (board && !live) setLabel($("boardClear"), "check", t("board.clear"));
+  if (!board) {
+    body.innerHTML = `<p class="board-empty">${escHtml(t("board.empty"))}</p>`;
+    return;
+  }
+  const elapsed = (board.endedAt || Date.now()) - board.startedAt;
+  const facts = [
+    board.client && `<span>${icon("user")}${escHtml(board.client)}</span>`,
+    `<span>${icon("clock")}${escHtml(t("board.started", { time: fmtDateTime(new Date(board.startedAt)) }))}</span>`,
+    `<span>${escHtml(t("board.elapsed", { t: fmtDur(elapsed) }))}</span>`,
+    board.demo ? `<span>${icon("play")}${escHtml(t("board.demo"))}</span>`
+      : board.models ? `<span>${icon("monitor")}${escHtml(board.models.join(" + "))}</span>` : "",
+    `<span class="board-chip ${board.state}">${escHtml(t(`board.state.${board.state}`))}</span>`,
+  ].filter(Boolean).join("");
+  const names = titles();
+  const tasks = TASK_ORDER.map((id, i) => {
+    const task = board.tasks[id];
+    const prev = TASK_ORDER.slice(0, i).map(p => names[p]).join(", ");
+    const tool = TASK_TOOLS[id];
+    const meta = [
+      `<span>${icon("report")}${escHtml(t("board.deliver", { x: t(`board.out.${id}`) }))}</span>`,
+      `<span>${icon("eye")}${escHtml(tool ? t("board.tools", { x: t(tool) }) : t("board.noTools"))}</span>`,
+      prev && `<span>${icon("arrow")}${escHtml(t("board.inputs", { x: prev }))}</span>`,
+    ].filter(Boolean).join("");
+    const when = [
+      task.state === "active" && task.startedAt && t("board.since", { time: fmtTime(new Date(task.startedAt)) }),
+      task.endedAt && task.startedAt && t("board.took", { t: fmtDur(task.endedAt - task.startedAt) }),
+      task.tools && t("board.lookups", { n: task.tools }),
+    ].filter(Boolean).join(" · ");
+    const name = staff[id]?.name && staff[id].name !== names[id] ? `<span class="who">· ${escHtml(staff[id].name)}</span>` : "";
+    return `<li class="board-task ${task.state}" style="--role:${roleColor(id)}">
+      <div class="num">${i + 1}</div>
+      <div class="main">
+        <div class="row"><strong>${escHtml(names[id])}${name}</strong>
+          <span class="board-badge">${icon(BADGE_ICON[task.state])}${escHtml(t(`board.st.${task.state}`))}</span></div>
+        <p class="desc">${escHtml(t(`board.task.${id}`))}</p>
+        <div class="meta">${meta}</div>
+        ${when ? `<div class="meta" style="margin-top:4px"><span>${icon("clock")}${escHtml(when)}</span></div>` : ""}
+        ${task.error ? `<p class="note err">${escHtml(task.error)}</p>` : task.note ? `<p class="note">“${escHtml(task.note)}”</p>` : ""}
+      </div>
+    </li>`;
+  }).join("");
+  body.innerHTML = `
+    <div class="board-mission">
+      <div class="board-label">${escHtml(t("board.request"))}</div>
+      <p class="board-prompt">${escHtml(board.prompt)}</p>
+      <div class="board-facts">${facts}</div>
+      ${board.error ? `<p class="note err" style="color:#ef8a7f;margin:8px 0 0;font-size:12px">${escHtml(board.error)}</p>` : ""}
+    </div>
+    <div>
+      <div class="board-label">${escHtml(t("board.plan"))}</div>
+      <ol class="board-tasks">${tasks}</ol>
+    </div>
+    <p class="board-foot">${escHtml(t("board.foot"))}</p>`;
+  clearInterval(boardTimer);
+  if (live) boardTimer = setInterval(() => { if ($("board").hidden) clearInterval(boardTimer); else renderBoard(); }, 1000);
+}
+function openBoard() {
+  if (!$("pledge").hidden || editor.open) return;
+  closeCabinet();
+  closePrinter();
+  const scroll = $("boardBody").scrollTop;
+  renderBoard();
+  $("board").hidden = false;
+  $("boardBody").scrollTop = scroll;
+  $("boardClose").focus();
+}
+function closeBoard() { $("board").hidden = true; clearInterval(boardTimer); }
+// Hoàn tất: xoá dữ liệu bảng, Giám đốc ra xoá bảng trắng.
+function clearBoard() {
+  if (!board) return;
+  if (board.state === "planning" || board.state === "running" || net.busy || isDemoRunning()) { toast(t("board.clearBusy"), 3000, "alert"); return; }
+  board = null;
+  try { localStorage.removeItem(BOARD_KEY); } catch { /* bỏ qua */ }
+  closeBoard();
+  toast(t("board.cleared"), 2500, "check");
+  log(t("log.boardCleared"), "job");
+  if (managerFree()) eraseBoardScene(); else runtime.boardInk = 0;
+}
+$("boardClear").addEventListener("click", clearBoard);
+$("boardClose").addEventListener("click", closeBoard);
+$("board").addEventListener("click", event => { if (event.target === $("board")) closeBoard(); });
 
 const escHtml = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 const PRINT_CSS = `
@@ -1165,23 +1318,31 @@ function handleMessage(msg) {
     case "snapshot":
       setBusy(msg.busy);
       for (const [id, st] of Object.entries(msg.agents || {})) applyStatus(id, st.status, st.message, { animate: false });
+      if (board && board.state !== "finished" && board.state !== "failed") {
+        if (!msg.busy) boardStopped();
+        else if (board.state === "stopped") Object.assign(board, { state: "running", endedAt: 0 });
+        boardChanged();
+      }
       if (msg.result && !$("reportBody").dataset.raw) showReport(msg.result, t("report.fromServer"));
       if (msg.busy) setStatus(t("status.busy"), "busy"); else idleStatus();
       renderTeam();
       break;
     case "status":
       applyStatus(msg.agent, msg.status, msg.message);
+      boardStatus(msg.agent, msg.status, msg.message);
       renderTeam();
       if (msg.status !== "idle") log(`${titles()[msg.agent] || msg.agent}: ${msg.message}`, msg.status === "error" ? "error" : "");
       break;
     case "activity":
       applyActivity(msg.agent, msg.kind, msg.message);
+      if (msg.kind === "tool" && board?.tasks[msg.agent]) { board.tasks[msg.agent].tools++; boardChanged(); }
       if (msg.kind === "tool" || msg.kind === "tool_error") {
         log(`${titles()[msg.agent] || msg.agent}: ${msg.kind === "tool" ? "🔎" : "⚠️"} ${msg.message}`, msg.kind === "tool" ? "tool" : "error");
       }
       break;
     case "handoff":
       applyHandoff(msg.from, msg.to);
+      if (board?.tasks[msg.from] && msg.message) { board.tasks[msg.from].note = msg.message; boardChanged(); }
       log(t("log.handoff", { from: titles()[msg.from], to: titles()[msg.to], msg: msg.message ? ` “${msg.message}”` : "" }), "handoff");
       break;
     case "job":
@@ -1189,6 +1350,7 @@ function handleMessage(msg) {
         setBusy(true);
         net.jobStartedAt = Date.now();
         setStatus(t("status.accepted", { prompt: msg.prompt }), "busy");
+        boardStart(msg);
         log(t("log.newJob", { prompt: msg.prompt }), "job");
       } else if (msg.state === "finished") {
         setBusy(false);
@@ -1200,6 +1362,7 @@ function handleMessage(msg) {
           secs,
         });
         showReport(msg.result || "", meta, { persist: true });
+        boardEnd("finished");
         setStatus(t("status.done"), "ok");
         log(t("log.approved"), "job");
         runScript("manager", [
@@ -1209,6 +1372,7 @@ function handleMessage(msg) {
       } else if (msg.state === "failed") {
         setBusy(false);
         showReport(t("report.failed", { error: msg.error }), null, { error: true });
+        boardEnd("failed", msg.error);
         setStatus(t("status.error", { error: msg.error }), "error");
         log(t("log.failed", { error: msg.error }), "error");
       }
@@ -1287,12 +1451,16 @@ async function startMission() {
   if (net.busy || net.submitting || isDemoRunning()) return;
   if (OFFLINE) {
     toast(t("toast.demoOffline"), 3500, "play");
+    net.lastPrompt = prompt;
     runDemo(handleMessage, client.name, prompt).finally(refreshControls);
     refreshControls();
     return;
   }
   net.submitting = true;
   refreshControls();
+  // Ghi nhớ trước khi gửi: sự kiện "job started" có thể tới qua WebSocket trước cả khi fetch trả về.
+  net.lastPrompt = prompt;
+  net.pendingModels = [modelLabel("leaderSelect"), modelLabel("workerSelect")];
   try {
     const res = await fetch(`${API_BASE}/api/tasks`, {
       method: "POST",
@@ -1304,8 +1472,6 @@ async function startMission() {
       const detail = typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
       setStatus(t("status.rejected", { detail }), "error");
       log(t("status.rejected", { detail }), "error");
-    } else {
-      net.lastPrompt = prompt;
     }
   } catch (error) {
     setStatus(t("status.sendFail", { error: error.message }), "error");
@@ -1431,6 +1597,7 @@ window.addEventListener("langchange", () => {
   renderReportActions();
   if (!$("cabinet").hidden) renderCabinet();
   if (!$("printer").hidden) renderPrinter();
+  if (!$("board").hidden) renderBoard();
   if (!net.busy && !isDemoRunning()) idleStatus();
 });
 
